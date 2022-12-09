@@ -80,6 +80,7 @@ struct TextureInfo {
 	int width;
 	int height;
 	int nChannels;
+	unsigned int tbo;
 };
 
 struct Camera;

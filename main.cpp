@@ -278,19 +278,58 @@ void renderQuad() {
 
 int main() {
 	GLFWInit();
-	glm::vec3 cameraPosition(0, 2, 5);
-	glm::vec3 cameraCenter(0, 2, 3);
+	glm::vec3 cameraPosition(0, 2.8, 9);
+	glm::vec3 cameraCenter(0, 2.8, 0);
 	glm::vec3 cameraUp(0, 1, 0);
 	Camera camera(cameraPosition, cameraCenter, cameraUp, 45.0, SCREEN_WIDTH, SCREEN_HEIGHT);
-	Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0.6, 1.85, 3.7)), 0);
-	Model m1("./model/marry/marry.obj", glm::mat4(1), 0);
-	Model m2("./model/floor/floor.obj", glm::mat4(1), 0);
-	std::vector<Model> models;
-	models.push_back(m0);
-	models.push_back(m1);
-	models.push_back(m2);
+
 	// 存储一个默认材质
 	materials.push_back(Material{});
+	Material m;
+	m.baseColor = glm::vec3(0.65, 0.05, 0.05);
+	materials.push_back(m);
+	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
+	materials.push_back(m);
+	m.baseColor = glm::vec3(0.12, 0.45, 0.15);
+	materials.push_back(m);
+	m.baseColor = glm::vec3(0.1);
+	m.emssive = glm::vec3(1);
+	materials.push_back(m);
+
+	// Cornell Box
+	//Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0.6, 1.85, 3.7)), 0);
+	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, 0)), 0);
+	Model f1("./model/floor/floor.obj", 
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
+	Model f2("./model/floor/floor.obj",
+		glm::translate(glm::mat4(1), glm::vec3(0, 2.75, -2.75)) *
+		glm::rotate(glm::mat4(1), glm::radians(90.f), glm::vec3(1.0, 0.0, 0.0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
+	Model f3("./model/floor/floor.obj",
+		glm::translate(glm::mat4(1), glm::vec3(2.75, 2.75, 0)) *
+		glm::rotate(glm::mat4(1), glm::radians(90.f), glm::vec3(0.0, 0.0, 1.0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), 3);
+	Model f4("./model/floor/floor.obj",
+		glm::translate(glm::mat4(1), glm::vec3(-2.75, 2.75, 0.0)) *
+		glm::rotate(glm::mat4(1), glm::radians(-90.f), glm::vec3(0.0, 0.0, 1.0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), 1);
+	Model f5("./model/floor/floor.obj",
+		glm::translate(glm::mat4(1), glm::vec3(0, 5.55, 0)) *
+		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
+	Model light("./model/floor/floor.obj",
+		glm::translate(glm::mat4(1), glm::vec3(0, 5.54, 0)) *
+		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.02)), 4);
+	std::vector<Model> models;
+	models.push_back(m1);
+	models.push_back(f1);
+	models.push_back(f2);
+	models.push_back(f3);
+	models.push_back(f4);
+	models.push_back(f5);
+	models.push_back(light);
+
 	ModelOutput(models, vertices, triangles);
 	std::cout << "Load " << vertices.size() << " vertices and " << triangles.size() << " triangles" << std::endl;
 
@@ -300,7 +339,7 @@ int main() {
 	auto c2 = clock();
 	std::cout << "Build BVH completed, cost: " << c2 - c1 << " ms" << std::endl;
 
-	int renderCase = 1; // 0: GPU, 1: CPU
+	int renderCase = 0; // 0: GPU, 1: CPU
 	if (renderCase == 0) {
 		ComputeShader cs("./shaders/ray_tracing.comp");
 		VFShader render("./shaders/render.vert", "./shaders/render.frag");
@@ -381,7 +420,7 @@ int main() {
 			triangleBuffer[num++] = (float)tri.indices[1];
 			triangleBuffer[num++] = (float)tri.indices[2];
 			triangleBuffer[num++] = (float)tri.materialId;
-			triangleBuffer[num++] = 0.f;
+			triangleBuffer[num++] = (float)tri.textureId;
 			triangleBuffer[num++] = 0.f;
 		}
 		glBindBuffer(GL_TEXTURE_BUFFER, tbo[2]);
@@ -408,7 +447,6 @@ int main() {
 			bvhnodeBuffer[num++] = 0.f;
 			bvhnodeBuffer[num++] = 0.f;
 		}
-
 		glBindBuffer(GL_TEXTURE_BUFFER, tbo[3]);
 		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * BVHNODE_SIZE * bvhaccel->bvh.size(), &bvhnodeBuffer[0], GL_STATIC_DRAW);
 		glActiveTexture(GL_TEXTURE0 + 3);
@@ -416,7 +454,37 @@ int main() {
 		glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[3]);
 		std::cout << "bvhnodeBuffer width: " << BVHNODE_SIZE * bvhaccel->bvh.size() / 3 << "\n";
 
-		unsigned int outputImage; //计算着色器输出图像
+		// 生成并载入物体的纹理
+		for (int i = 0; i < textureInfos.size(); ++i) {
+			int width = textureInfos[i].width;
+			int height = textureInfos[i].height;
+			int nChannels = textureInfos[i].nChannels;
+
+			GLenum format;
+			if (nChannels == 1) format = GL_RED;
+			if (nChannels == 3) format = GL_RGB;
+			if (nChannels == 4) format = GL_RGBA;
+
+			unsigned int texture;
+			glGenTextures(1, &texture);
+			glActiveTexture(GL_TEXTURE4 + i); // 0, 1, 2, 3已被占用
+			glBindTexture(GL_TEXTURE_2D, texture);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, textures[i]);
+			glGenerateMipmap(GL_TEXTURE_2D);
+			textureInfos[i].tbo = texture;
+		}
+
+		// 给计算着色器中所有的textures[]绑定位置
+		for (int i = 0; i < 20; ++i) { 
+			std::string name = "textures[" + std::to_string(i) + "]";
+			cs.setInt(name.c_str(), i + 4);
+		}
+
+		unsigned int outputImage; // 计算着色器输出图像
 		glCreateTextures(GL_TEXTURE_2D, 1, &outputImage);
 		glTextureStorage2D(outputImage, 1, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT);
 		glBindImageTexture(0, outputImage, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
@@ -474,6 +542,9 @@ int main() {
 				ray.dir = glm::normalize(ray.dir);
 				Interaction isect;
 				int dataPos = camera.nChannels * ((SCREEN_HEIGHT - j - 1) * SCREEN_WIDTH + i);
+				if (i == 400 && j == 200) {
+					std::cout << "sdf";
+				}
 				if (bvhaccel->Intersect(ray, &isect)) {
 					glm::vec3 color = materials[isect.materialId].baseColor * 255.f;
 					if (isect.textureId != -1) {
