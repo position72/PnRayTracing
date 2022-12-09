@@ -7,6 +7,7 @@ struct Triangle {
 	// material和texture在各自vector中的索引，在glsl里起到类似指针的作用
 	int materialId = 0;
 	int textureId = -1;
+	float area = 0.f;
 	Bound bound;
 	glm::vec3 boundCenter = glm::vec3(0);
 };

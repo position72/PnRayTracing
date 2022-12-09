@@ -22,6 +22,7 @@
 #include <limits>
 #include <vector>
 #include <map>
+#include <set>
 #include <algorithm>
 
 constexpr float FLOAT_MIN = std::numeric_limits<float>::lowest();
@@ -34,6 +35,7 @@ constexpr int VERTEX_SIZE = 15;
 constexpr int MATERIAL_SIZE = 18; 
 constexpr int TRIANGLE_SIZE = 6;
 constexpr int BVHNODE_SIZE = 12;
+constexpr int LIGHT_SIZE = 3;
 
 
 struct Vertex {
@@ -52,7 +54,7 @@ struct Ray {
 
 struct Material {
 	glm::vec3 emssive = glm::vec3(0.f);
-	glm::vec3 baseColor = glm::vec3(0.5f);
+	glm::vec3 baseColor = glm::vec3(0.8f);
 	float subsurface = 0.0;
 	float metallic = 0.0;
 	float specular = 0.0;
@@ -86,6 +88,7 @@ struct TextureInfo {
 struct Camera;
 struct Bound;
 struct Triangle;
+struct Light;
 struct Mesh;
 class Model;
 class Shader;
@@ -99,6 +102,7 @@ std::vector<unsigned char*> textures;
 // 相同路径指向textures中同一个纹理，节省空间
 std::map<std::string, int> texturePathToId;
 std::vector<TextureInfo> textureInfos;
+std::vector<Light> lights;
 
 inline glm::vec3 TextureGetColor(int i, float u, float v) {
 	const TextureInfo& info = textureInfos[i];

@@ -34,6 +34,7 @@ struct Triangle {
 	ivec3 indices;
 	int materialId;
 	int textureId;
+	float area;
 };
 
 struct BVHNode {
@@ -49,6 +50,11 @@ struct Ray {
 	vec3 origin;
 	vec3 dir;
 	float tMax;
+};
+
+struct Light {
+	int index; 
+	float prefixArea; 
 };
 
 struct Interaction {
@@ -71,6 +77,7 @@ struct Camera{
 #define MATERIAL_VEC3_COUNT 6
 #define TRIANGLE_VEC3_COUNT 2
 #define BVHNODE_VEC3_COUNT 4
+#define LIGHT_VEC3_COUNT 1
 
 layout(binding = 0, rgba32f) writeonly uniform image2D output_image;
 
@@ -78,6 +85,7 @@ layout(binding = 0) uniform samplerBuffer vertices;
 layout(binding = 1) uniform samplerBuffer materials;
 layout(binding = 2) uniform samplerBuffer triangles;
 layout(binding = 3) uniform samplerBuffer bvh_nodes;
+layout(binding = 4) uniform samplerBuffer lights;
 
 uniform sampler2D textures[20];
 
@@ -120,9 +128,10 @@ Triangle GetTriangle(int i) {
 	int offset = i * TRIANGLE_VEC3_COUNT;
 	Triangle tri;
 	tri.indices  = ivec3(texelFetch(triangles, offset + 0).rgb);
-	ivec3 param  = ivec3(texelFetch(triangles, offset + 1).rgb);
-	tri.materialId = param[0];
-	tri.textureId  = param[1];
+	vec3 param   = texelFetch(triangles, offset + 1).rgb;
+	tri.materialId = int(param[0]);
+	tri.textureId  = int(param[1]);
+	tri.area  = param[2];
 	return tri;
 }
 
@@ -139,6 +148,16 @@ BVHNode GetBVHNode(int i) {
 	node.endIndex = int(param2[0]);
 	return node;
 }
+
+Light GetLight(int i) {
+	int offset = i * LIGHT_VEC3_COUNT;
+	Light l;
+	vec3 param = texelFetch(lights, offset + 0).rgb;
+	l.index = int(param[0]);
+	l.prefixArea = param[1];
+	return l;
+}
+
 uniform mat4 ScreenToWorld;
 uniform vec3 CameraEye;
 uniform int SCREEN_WIDTH;
@@ -162,7 +181,6 @@ bool BoundIntersect(in Bound bound, in Ray ray) {
 
     vec3 f = (bound.pMax - ray.origin) * invdir;
     vec3 n = (bound.pMin - ray.origin) * invdir;
-
 	/* 
 		各个分量最早离开包围盒的时刻为光线离开包围盒的时刻
 		各个分量最晚进入包围盒的时刻为光线进入包围盒的时刻
@@ -180,7 +198,6 @@ void swap(inout float f1, inout float f2) {
 	f1 = f2;
 	f2 = t;
 }
-
 
 // PBRT3中的三角形求交方法
 bool TriangleIntersect(in Triangle tri, inout Ray ray, out Interaction isect) {
@@ -322,6 +339,9 @@ bool BVHIntersect(inout Ray r, out Interaction isect) {
 	}
 	return hit;
 }
+
+
+
 
 void main() {
 	ivec2 p = ivec2(gl_GlobalInvocationID.xy);

@@ -1,5 +1,7 @@
 #pragma once
 #include "PnRT.hpp"
+#include "light.hpp"
+#include "triangle.hpp"
 
 /*	
 	Material以Model为单位，Texture以Mesh为单位
@@ -92,7 +94,7 @@ private:
 	}
 };
 
-inline void ModelOutput(const std::vector<Model>& models, std::vector<Vertex>& vertices, std::vector<Triangle>& triangles) {
+inline void ModelOutput(const std::vector<Model>& models) {
 	int countVertices = 0;
 	for (const auto& model : models) {
 		glm::mat4 normalMatrix = glm::transpose(glm::inverse(model.modelMatrix));
@@ -113,6 +115,10 @@ inline void ModelOutput(const std::vector<Model>& models, std::vector<Vertex>& v
 				triangle.indices[2] = mesh.indices[i + 2] + countVertices;
 				triangle.materialId = model.materialId;
 				triangle.textureId = mesh.textureId;
+				const glm::vec3& p0 = vertices[triangle.indices[0]].position;
+				const glm::vec3& p1 = vertices[triangle.indices[1]].position;
+				const glm::vec3& p2 = vertices[triangle.indices[2]].position;
+				triangle.area = glm::length(glm::cross(p1 - p0, p2 - p0)) * 0.5;
 				triangle.bound.Union(vertices[triangle.indices[0]].position);
 				triangle.bound.Union(vertices[triangle.indices[1]].position);
 				triangle.bound.Union(vertices[triangle.indices[2]].position);

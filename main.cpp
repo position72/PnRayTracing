@@ -4,6 +4,7 @@
 #include "camera.hpp"
 #include "model.hpp"
 #include "shader.hpp"
+#include "light.hpp"
 
 void APIENTRY glDebugOutput(GLenum source,
 	GLenum type,
@@ -330,14 +331,25 @@ int main() {
 	models.push_back(f5);
 	models.push_back(light);
 
-	ModelOutput(models, vertices, triangles);
+	ModelOutput(models); 
 	std::cout << "Load " << vertices.size() << " vertices and " << triangles.size() << " triangles" << std::endl;
 
-	auto c1 = clock();
 	// 构建bvh，获取bvh结构以及重排后的顶点和三角形数据
+	auto c1 = clock();
 	auto bvhaccel = std::make_shared<BVH>(std::move(vertices), std::move(triangles));
 	auto c2 = clock();
 	std::cout << "Build BVH completed, cost: " << c2 - c1 << " ms" << std::endl;
+
+	// 在重排后的三角形中寻找能自发光的三角形索引，加入到lights
+	for (const auto& tri : bvhaccel->triangles) {
+		if (materials[tri.materialId].emssive != glm::vec3(0)) {
+			lights.push_back({ (int)triangles.size(), tri.area });
+			if (lights.size() > 1) {
+				lights[lights.size() - 1].prefixArea += lights[lights.size() - 2].prefixArea;
+			}
+		}
+	}
+	std::cout << "Load " << lights.size() << " lights" << std::endl;
 
 	int renderCase = 0; // 0: GPU, 1: CPU
 	if (renderCase == 0) {
@@ -352,9 +364,9 @@ int main() {
 		// 将数据存放到缓冲纹理中并传输到着色器中
 
 		// 创建缓冲区对象和纹理对象
-		unsigned int tbo[4], tex[4];
-		glGenBuffers(4, tbo);
-		glGenTextures(4, tex);
+		unsigned int tbo[5], tex[5];
+		glGenBuffers(5, tbo);
+		glGenTextures(5, tex);
 	
 		std::vector<float> vertexBuffer; // 顶点
 		vertexBuffer.resize(VERTEX_SIZE * bvhaccel->vertices.size());
@@ -421,7 +433,7 @@ int main() {
 			triangleBuffer[num++] = (float)tri.indices[2];
 			triangleBuffer[num++] = (float)tri.materialId;
 			triangleBuffer[num++] = (float)tri.textureId;
-			triangleBuffer[num++] = 0.f;
+			triangleBuffer[num++] = tri.area;
 		}
 		glBindBuffer(GL_TEXTURE_BUFFER, tbo[2]);
 		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * TRIANGLE_SIZE * bvhaccel->triangles.size(), &triangleBuffer[0], GL_STATIC_DRAW);
@@ -454,6 +466,21 @@ int main() {
 		glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[3]);
 		std::cout << "bvhnodeBuffer width: " << BVHNODE_SIZE * bvhaccel->bvh.size() / 3 << "\n";
 
+		std::vector<float> lightBuffer; // 灯光
+		lightBuffer.resize(LIGHT_SIZE * lights.size());
+		num = 0;
+		for (const auto& l : lights) {
+			lightBuffer[num++] = (float)l.index;
+			lightBuffer[num++] = l.prefixArea;
+			lightBuffer[num++] = 0.f;
+		}
+		glBindBuffer(GL_TEXTURE_BUFFER, tbo[4]);
+		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * LIGHT_SIZE * lights.size(), &lightBuffer[0], GL_STATIC_DRAW);
+		glActiveTexture(GL_TEXTURE0 + 4);
+		glBindTexture(GL_TEXTURE_BUFFER, tex[4]);
+		glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[4]);
+		std::cout << "lightBuffer width: " << LIGHT_SIZE * lights.size() / 3 << "\n";
+
 		// 生成并载入物体的纹理
 		for (int i = 0; i < textureInfos.size(); ++i) {
 			int width = textureInfos[i].width;
@@ -467,7 +494,7 @@ int main() {
 
 			unsigned int texture;
 			glGenTextures(1, &texture);
-			glActiveTexture(GL_TEXTURE4 + i); // 0, 1, 2, 3已被占用
+			glActiveTexture(GL_TEXTURE5 + i); // 0, 1, 2, 3, 4已被占用
 			glBindTexture(GL_TEXTURE_2D, texture);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -481,7 +508,7 @@ int main() {
 		// 给计算着色器中所有的textures[]绑定位置
 		for (int i = 0; i < 20; ++i) { 
 			std::string name = "textures[" + std::to_string(i) + "]";
-			cs.setInt(name.c_str(), i + 4);
+			cs.setInt(name.c_str(), i + 5);
 		}
 
 		unsigned int outputImage; // 计算着色器输出图像
@@ -499,8 +526,6 @@ int main() {
 
 		const unsigned int WORK_BLOCK_SIZE = 32;
 		float lastTime = glfwGetTime(), deltaTime;
-	
-	
 		while (!glfwWindowShouldClose(window)) {
 			float currentTime = glfwGetTime();
 			deltaTime = currentTime - lastTime;

@@ -149,6 +149,7 @@
   <ItemGroup>
     <ClInclude Include="include\bound.hpp" />
     <ClInclude Include="include\camera.hpp" />
+    <ClInclude Include="include\light.hpp" />
     <ClInclude Include="include\model.hpp" />
     <ClInclude Include="include\PnRT.hpp" />
     <ClInclude Include="include\shader.hpp" />
