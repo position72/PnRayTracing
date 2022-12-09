@@ -53,7 +53,9 @@ struct Ray {
 struct Interaction {
 	vec3 position;
 	vec3 normal;
+	vec2 texcoord;
 	int materialId;
+	int textureId;
 	float time;
 };
 
@@ -75,6 +77,7 @@ layout(binding = 0) uniform samplerBuffer vertices;
 layout(binding = 1) uniform samplerBuffer materials;
 layout(binding = 2) uniform samplerBuffer triangles;
 layout(binding = 3) uniform samplerBuffer bvh_nodes;
+layout(binding = 4) uniform sampler2D textures[100];
 
 Vertex GetVertex(int i) {
 	int offset = i * VERTEX_VEC3_COUNT;

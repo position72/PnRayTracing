@@ -1,4 +1,4 @@
-#include "PnRT.h"
+#include "PnRT.hpp"
 #include "bound.hpp"
 #include "triangle.hpp"
 #include "camera.hpp"
@@ -88,9 +88,8 @@ struct BVHNode {
 
 class BVH {
 public:
-	BVH(const std::vector<Vertex>& vertices, const std::vector<Material>& materials,
-		const std::vector<Triangle>& triangles) : vertices(vertices),
-		materials(materials), triangles(triangles) {
+	BVH(const std::vector<Vertex>& vertices, const std::vector<Triangle>& triangles) 
+		: vertices(vertices), triangles(triangles) {
 		BuildBVH(0, triangles.size());
 	}
 
@@ -107,7 +106,7 @@ public:
 			if (!BoundIntersect(node.bound, r)) continue;
 			if (node.rightChild == -1) { // 叶子节点
 				for (int i = node.startIndex; i < node.endIndex; ++i) { // 每个三角形求交
-					if (TriangleIntersect(triangles[i], r, vertices, isect)) {
+					if (TriangleIntersect2(triangles[i], r, vertices, isect)) {
 						hit = true;
 					}
 				}
@@ -220,7 +219,6 @@ private:
 	float trav = 1.f;
 public:
 	std::vector<Vertex> vertices;
-	std::vector<Material> materials;
 	std::vector<Triangle> triangles;
 	std::vector<BVHNode> bvh;
 };
@@ -252,7 +250,6 @@ void PrefixSum() {
 	for (int i = 0; i < 20; ++i)
 		std::cout << out_data[i] << " ";
 }
-
 
 void renderQuad() {
 	static unsigned int quadVAO = 0, quadVBO;
@@ -292,21 +289,18 @@ int main() {
 	models.push_back(m0);
 	models.push_back(m1);
 	models.push_back(m2);
-	std::vector<Vertex> vertices;
-	std::vector<Triangle> triangles;
-	std::vector<Material> materials;
-	for (int i = 0; i < 10; ++i)
-		materials.push_back(Material{});
+	// 存储一个默认材质
+	materials.push_back(Material{});
 	ModelOutput(models, vertices, triangles);
 	std::cout << "Load " << vertices.size() << " vertices and " << triangles.size() << " triangles" << std::endl;
+
 	auto c1 = clock();
 	// 构建bvh，获取bvh结构以及重排后的顶点和三角形数据
-	auto bvhaccel = std::make_shared<BVH>(std::move(vertices), 
-		std::move(materials), std::move(triangles));
+	auto bvhaccel = std::make_shared<BVH>(std::move(vertices), std::move(triangles));
 	auto c2 = clock();
 	std::cout << "Build BVH completed, cost: " << c2 - c1 << " ms" << std::endl;
 
-	int renderCase = 0; // 0: GPU, 1: CPU
+	int renderCase = 1; // 0: GPU, 1: CPU
 	if (renderCase == 0) {
 		ComputeShader cs("./shaders/ray_tracing.comp");
 		VFShader render("./shaders/render.vert", "./shaders/render.frag");
@@ -344,15 +338,15 @@ int main() {
 			vertexBuffer[num++] = 0.f; // 保证12字节对齐
 		}
 		glBindBuffer(GL_TEXTURE_BUFFER, tbo[0]); // 绑定缓冲区
-		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * VERTEX_SIZE * vertices.size(), &vertexBuffer[0], GL_STATIC_DRAW); // 向纹理填充数据
+		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * VERTEX_SIZE * bvhaccel->vertices.size(), &vertexBuffer[0], GL_STATIC_DRAW); // 向纹理填充数据
 		glActiveTexture(GL_TEXTURE0 + 0);
 		glBindTexture(GL_TEXTURE_BUFFER, tex[0]); // 绑定纹理
 		glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[0]); // 将tbo中的数据关联到texture buffer
 
 		std::vector<float> materialBuffer; // 材质
-		materialBuffer.resize(MATERIAL_SIZE * bvhaccel->materials.size());
+		materialBuffer.resize(MATERIAL_SIZE * materials.size());
 		num = 0;
-		for (const auto& material : bvhaccel->materials) {
+		for (const auto& material : materials) {
 			materialBuffer[num++] = material.emssive[0];
 			materialBuffer[num++] = material.emssive[1];
 			materialBuffer[num++] = material.emssive[2];
@@ -391,11 +385,11 @@ int main() {
 			triangleBuffer[num++] = 0.f;
 		}
 		glBindBuffer(GL_TEXTURE_BUFFER, tbo[2]);
-		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * TRIANGLE_SIZE * triangles.size(), &triangleBuffer[0], GL_STATIC_DRAW);
+		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * TRIANGLE_SIZE * bvhaccel->triangles.size(), &triangleBuffer[0], GL_STATIC_DRAW);
 		glActiveTexture(GL_TEXTURE0 + 2);
 		glBindTexture(GL_TEXTURE_BUFFER, tex[2]);
 		glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[2]);
-		std::cout << "triangleBuffer width: " << TRIANGLE_SIZE * triangles.size() / 3 << "\n";
+		std::cout << "triangleBuffer width: " << TRIANGLE_SIZE * bvhaccel->triangles.size() / 3 << "\n";
 
 		std::vector<float> bvhnodeBuffer; // bvh结点
 		bvhnodeBuffer.resize(BVHNODE_SIZE * bvhaccel->bvh.size());
@@ -481,9 +475,13 @@ int main() {
 				Interaction isect;
 				int dataPos = camera.nChannels * ((SCREEN_HEIGHT - j - 1) * SCREEN_WIDTH + i);
 				if (bvhaccel->Intersect(ray, &isect)) {
-					camera.data[dataPos + 0] = 251;
-					camera.data[dataPos + 1] = 12;
-					camera.data[dataPos + 2] = 38;
+					glm::vec3 color = materials[isect.materialId].baseColor * 255.f;
+					if (isect.textureId != -1) {
+						color = TextureGetColor(isect.textureId, isect.texcoord[0], isect.texcoord[1]);
+					} 
+					camera.data[dataPos + 0] = color[0];
+					camera.data[dataPos + 1] = color[1];
+					camera.data[dataPos + 2] = color[2];
 				} else {
 					camera.data[dataPos + 0] = 0;
 					camera.data[dataPos + 1] = 0;

@@ -21,6 +21,7 @@
 #include <sstream>
 #include <limits>
 #include <vector>
+#include <map>
 #include <algorithm>
 
 constexpr float FLOAT_MIN = std::numeric_limits<float>::lowest();
@@ -36,22 +37,22 @@ constexpr int BVHNODE_SIZE = 12;
 
 
 struct Vertex {
-	glm::vec3 position;
-	glm::vec3 normal;
-	glm::vec3 tangent;
-	glm::vec3 bitangent;
-	glm::vec2 texcoord;
+	glm::vec3 position = glm::vec3(0.f);
+	glm::vec3 normal = glm::vec3(0.f);
+	glm::vec3 tangent = glm::vec3(0.f);
+	glm::vec3 bitangent = glm::vec3(0.f);
+	glm::vec2 texcoord = glm::vec3(0.f);
 };
 
 struct Ray {
-	glm::vec3 origin;
-	glm::vec3 dir;
-	mutable float tMax;
+	glm::vec3 origin = glm::vec3(0.f);
+	glm::vec3 dir = glm::vec3(0.f);
+	mutable float tMax = FLOAT_MAX;
 };
 
 struct Material {
 	glm::vec3 emssive = glm::vec3(0.f);
-	glm::vec3 baseColor = glm::vec3(0.f);
+	glm::vec3 baseColor = glm::vec3(0.5f);
 	float subsurface = 0.0;
 	float metallic = 0.0;
 	float specular = 0.0;
@@ -67,10 +68,18 @@ struct Material {
 };
 
 struct Interaction {
-	glm::vec3 position;
-	glm::vec3 normal;
-	int materialId;
-	float time;
+	glm::vec3 position = glm::vec3(0.f);
+	glm::vec3 normal = glm::vec3(0.f);
+	glm::vec2 texcoord = glm::vec3(0.f);
+	int textureId = 0;
+	int materialId = 0;
+	float time = FLOAT_MAX;
+};
+
+struct TextureInfo {
+	int width;
+	int height;
+	int nChannels;
 };
 
 struct Camera;
@@ -79,3 +88,25 @@ struct Triangle;
 struct Mesh;
 class Model;
 class Shader;
+
+
+// resource
+std::vector<Vertex> vertices;
+std::vector<Triangle> triangles;
+std::vector<Material> materials;
+std::vector<unsigned char*> textures; 
+// 相同路径指向textures中同一个纹理，节省空间
+std::map<std::string, int> texturePathToId;
+std::vector<TextureInfo> textureInfos;
+
+inline glm::vec3 TextureGetColor(int i, float u, float v) {
+	const TextureInfo& info = textureInfos[i];
+	int x = static_cast<int>(info.width * u);
+	int y = static_cast<int>(info.height * v);
+	glm::vec3 color;
+	int pos = info.nChannels * (y * info.width + x);
+	color[0] = textures[i][pos + 0];
+	color[1] = textures[i][pos + 1];
+	color[2] = textures[i][pos + 2];
+	return color;
+}

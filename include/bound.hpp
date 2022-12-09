@@ -1,5 +1,5 @@
 #pragma once
-#include "PnRT.h"
+#include "PnRT.hpp"
 
 struct Bound {
 	Bound() {

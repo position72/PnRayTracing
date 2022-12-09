@@ -1,5 +1,5 @@
 #pragma once
-#include "PnRT.h"
+#include "PnRT.hpp"
 
 inline unsigned int createAndCompileShader(const char* shaderSource, GLenum type) {
 	unsigned int shader = glCreateShader(type);

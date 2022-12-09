@@ -150,7 +150,7 @@
     <ClInclude Include="include\bound.hpp" />
     <ClInclude Include="include\camera.hpp" />
     <ClInclude Include="include\model.hpp" />
-    <ClInclude Include="include\PnRT.h" />
+    <ClInclude Include="include\PnRT.hpp" />
     <ClInclude Include="include\shader.hpp" />
     <ClInclude Include="include\stb_image.h" />
     <ClInclude Include="include\stb_image_write.h" />

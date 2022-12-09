@@ -1,5 +1,5 @@
 #pragma once
-#include "PnRT.h"
+#include "PnRT.hpp"
 
 struct Camera {
 	Camera(const glm::vec3& eye, const glm::vec3& center, const glm::vec3& up, 
@@ -44,5 +44,6 @@ struct Camera {
 };
 
 inline Ray CameraGetRay(const Camera& camera, float s, float t) {
-	return Ray{ camera.eye, camera.lowerLeftCorner + s * camera.horizontal + t * camera.vertical - camera.eye, FLOAT_MAX };
+	return Ray{ camera.eye, camera.lowerLeftCorner + s * camera.horizontal + 
+		t * camera.vertical - camera.eye, FLOAT_MAX };
 }
