@@ -50,6 +50,9 @@
     <ClInclude Include="include\light.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="include\BSDF.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\prefix_sum.comp" />

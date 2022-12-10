@@ -5,6 +5,7 @@
 #include "model.hpp"
 #include "shader.hpp"
 #include "light.hpp"
+#include "BSDF.hpp"
 
 void APIENTRY glDebugOutput(GLenum source,
 	GLenum type,
@@ -107,7 +108,7 @@ public:
 			if (!BoundIntersect(node.bound, r)) continue;
 			if (node.rightChild == -1) { // 叶子节点
 				for (int i = node.startIndex; i < node.endIndex; ++i) { // 每个三角形求交
-					if (TriangleIntersect2(triangles[i], r, vertices, isect)) {
+					if (TriangleIntersect(triangles[i], r, vertices, isect)) {
 						hit = true;
 					}
 				}
@@ -126,6 +127,38 @@ public:
 			}
 		}
 		return hit;
+	}
+
+	// 只进行相交测试，不返回Interaction信息
+	bool IntersectP(const Ray& r) const {
+		// 把将要访问的节点压入栈中
+		int nodeStack[128], top = 0;
+		nodeStack[top++] = 0;
+		while (top) {
+			const int curId = nodeStack[--top];
+			const BVHNode& node = bvh[curId];
+			// 未击中该点包围盒则跳过
+			if (!BoundIntersect(node.bound, r)) continue;
+			if (node.rightChild == -1) { // 叶子节点
+				for (int i = node.startIndex; i < node.endIndex; ++i) { // 每个三角形求交
+					if (TriangleIntersectP(triangles[i], r, vertices))
+						return true;
+				}
+			} else { // 非叶子节点
+				// 在划分轴上光线方向为负方向，则需要先访问右儿子
+				if (r.dir[node.axis] < 0) {
+					nodeStack[top++] = curId + 1;
+					// 判断是否击中另一个儿子的包围盒
+					const BVHNode& rc = bvh[node.rightChild];
+					if (BoundIntersect(rc.bound, r)) nodeStack[top++] = node.rightChild;
+				} else {
+					nodeStack[top++] = node.rightChild;
+					const BVHNode& lc = bvh[curId + 1];
+					if (BoundIntersect(lc.bound, r)) nodeStack[top++] = curId + 1;
+				}
+			}
+		}
+		return false;
 	}
 private:
 	struct Bucket {
@@ -277,6 +310,42 @@ void renderQuad() {
 	glBindVertexArray(0);
 }
 
+glm::vec3 Lo(const Interaction& isect, const glm::vec3& wo, const BVH& bvhaccel) {
+	const glm::vec3& p = isect.position;
+	const glm::vec3& n = isect.normal;
+	Material material = materials[isect.materialId];
+	if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
+		material.baseColor = TextureGetColor1(isect.textureId, isect.texcoord[0], isect.texcoord[1]);
+	}
+	glm::vec3 wi;
+	float pdf;
+	// BRDF项，返回函数值，采样方向和概率
+	glm::vec3 f = DiffuseBRDF(n, wo, material, &wi, &pdf); 
+	// 自发光
+	glm::vec3 LDirect = material.emssive;
+	// 其他灯光的直接光照
+	int triIndex = GetLightIndex(Rand0To1());
+	if (triIndex != -1) { // 找到其中一个灯光
+		// 在该三角形上采样
+		const Triangle& tri = bvhaccel.triangles[triIndex];
+		Interaction triangleIsect = TriangleSample(tri, glm::vec2(Rand0To1(), Rand0To1()), bvhaccel.vertices);
+		// 发射阴影射线，判断灯光与当前点之间有无遮挡
+		Ray r;
+		r.dir = triangleIsect.position - p;
+		r.tMax = 1.f - ShadowEpsilon; // 防止光线与目标物体相交
+		r.origin = p + n * 0.0001f; // 防止自相交
+		if (!bvhaccel.IntersectP(r)) {
+			// pdf为所有灯光表面积的倒数
+			float lPdf = 1.f / lights[lights.size() - 1].prefixArea;
+			float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
+			const glm::vec3& li = materials[triangleIsect.materialId].emssive;
+			LDirect += f * li * std::abs(glm::dot(n, r.dir) * glm::dot(triangleIsect.normal, r.dir)) / 
+				(lPdf * dis2);
+		}
+	}
+	return LDirect;
+}
+
 int main() {
 	GLFWInit();
 	glm::vec3 cameraPosition(0, 2.8, 9);
@@ -341,9 +410,10 @@ int main() {
 	std::cout << "Build BVH completed, cost: " << c2 - c1 << " ms" << std::endl;
 
 	// 在重排后的三角形中寻找能自发光的三角形索引，加入到lights
-	for (const auto& tri : bvhaccel->triangles) {
+	for (int i = 0; i < bvhaccel->triangles.size(); ++i) {
+		const Triangle& tri = bvhaccel->triangles[i];
 		if (materials[tri.materialId].emssive != glm::vec3(0)) {
-			lights.push_back({ (int)triangles.size(), tri.area });
+			lights.push_back({ i, tri.area });
 			if (lights.size() > 1) {
 				lights[lights.size() - 1].prefixArea += lights[lights.size() - 2].prefixArea;
 			}
@@ -351,7 +421,7 @@ int main() {
 	}
 	std::cout << "Load " << lights.size() << " lights" << std::endl;
 
-	int renderCase = 0; // 0: GPU, 1: CPU
+	int renderCase = 1; // 0: GPU, 1: CPU
 	if (renderCase == 0) {
 		ComputeShader cs("./shaders/ray_tracing.comp");
 		VFShader render("./shaders/render.vert", "./shaders/render.frag");
@@ -567,17 +637,23 @@ int main() {
 				ray.dir = glm::normalize(ray.dir);
 				Interaction isect;
 				int dataPos = camera.nChannels * ((SCREEN_HEIGHT - j - 1) * SCREEN_WIDTH + i);
-				if (i == 400 && j == 200) {
-					std::cout << "sdf";
-				}
 				if (bvhaccel->Intersect(ray, &isect)) {
-					glm::vec3 color = materials[isect.materialId].baseColor * 255.f;
+					/*glm::vec3 color = materials[isect.materialId].baseColor * 255.f;
 					if (isect.textureId != -1) {
-						color = TextureGetColor(isect.textureId, isect.texcoord[0], isect.texcoord[1]);
-					} 
-					camera.data[dataPos + 0] = color[0];
-					camera.data[dataPos + 1] = color[1];
-					camera.data[dataPos + 2] = color[2];
+						color = TextureGetColor255(isect.textureId, isect.texcoord[0], isect.texcoord[1]);
+					} */
+					if (i == 153 && j == 3) {
+						std::cout << "break!" << std::endl;
+					}
+					const int SAMPLE_COUNT = 30;
+					glm::vec3 color;
+					for (int s = 0; s < SAMPLE_COUNT; ++s) {
+						color += Lo(isect, -ray.dir, *bvhaccel);
+					}
+					color /= SAMPLE_COUNT;
+					camera.data[dataPos + 0] = Clamp(color[0] * 255, 0, 255);
+					camera.data[dataPos + 1] = Clamp(color[1] * 255, 0, 255);
+					camera.data[dataPos + 2] = Clamp(color[2] * 255, 0, 255);
 				} else {
 					camera.data[dataPos + 0] = 0;
 					camera.data[dataPos + 1] = 0;

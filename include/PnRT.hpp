@@ -27,8 +27,11 @@
 
 constexpr float FLOAT_MIN = std::numeric_limits<float>::lowest();
 constexpr float FLOAT_MAX = std::numeric_limits<float>::max();
-constexpr int SCREEN_WIDTH = 800;
-constexpr int SCREEN_HEIGHT = 600;
+constexpr float PI = 3.14159265358979323846;
+constexpr float InvPI = 0.31830988618379067154;
+constexpr float ShadowEpsilon = 0.0001f;
+constexpr int SCREEN_WIDTH = 400;
+constexpr int SCREEN_HEIGHT = 300;
 
 // count of float
 constexpr int VERTEX_SIZE = 15;
@@ -104,7 +107,7 @@ std::map<std::string, int> texturePathToId;
 std::vector<TextureInfo> textureInfos;
 std::vector<Light> lights;
 
-inline glm::vec3 TextureGetColor(int i, float u, float v) {
+inline glm::vec3 TextureGetColor255(int i, float u, float v) {
 	const TextureInfo& info = textureInfos[i];
 	int x = static_cast<int>(info.width * u);
 	int y = static_cast<int>(info.height * v);
@@ -114,4 +117,26 @@ inline glm::vec3 TextureGetColor(int i, float u, float v) {
 	color[1] = textures[i][pos + 1];
 	color[2] = textures[i][pos + 2];
 	return color;
+}
+
+inline glm::vec3 TextureGetColor1(int i, float u, float v) {
+	const TextureInfo& info = textureInfos[i];
+	int x = static_cast<int>(info.width * u);
+	int y = static_cast<int>(info.height * v);
+	glm::vec3 color;
+	int pos = info.nChannels * (y * info.width + x);
+	color[0] = textures[i][pos + 0];
+	color[1] = textures[i][pos + 1];
+	color[2] = textures[i][pos + 2];
+	return color / 255.f;
+}
+
+inline float Rand0To1() {
+	return (float)(rand() % 100000) / 100000;
+}
+
+inline float Clamp(float x, float L, float R) {
+	if (x >= R) return R;
+	if (x <= L) return L;
+	return x;
 }
