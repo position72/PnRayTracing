@@ -33,6 +33,10 @@ public:
 		glUniform1i(glGetUniformLocation(program, name), num);
 	}
 
+	void setUInt(const GLchar* name, const GLuint& num) const {
+		glUniform1ui(glGetUniformLocation(program, name), num);
+	}
+
 	void setVec3f(const GLchar* name, const GLfloat& v0,
 		const GLfloat& v1, const GLfloat& v2) const {
 		glUniform3f(glGetUniformLocation(program, name), v0, v1, v2);

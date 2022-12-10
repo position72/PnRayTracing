@@ -30,8 +30,8 @@ constexpr float FLOAT_MAX = std::numeric_limits<float>::max();
 constexpr float PI = 3.14159265358979323846;
 constexpr float InvPI = 0.31830988618379067154;
 constexpr float ShadowEpsilon = 0.0001f;
-constexpr int SCREEN_WIDTH = 400;
-constexpr int SCREEN_HEIGHT = 300;
+constexpr int SCREEN_WIDTH = 800;
+constexpr int SCREEN_HEIGHT = 600;
 
 // count of float
 constexpr int VERTEX_SIZE = 15;

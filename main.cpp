@@ -363,12 +363,12 @@ int main() {
 	m.baseColor = glm::vec3(0.12, 0.45, 0.15);
 	materials.push_back(m);
 	m.baseColor = glm::vec3(0.1);
-	m.emssive = glm::vec3(1);
+	m.emssive = glm::vec3(2);
 	materials.push_back(m);
 
 	// Cornell Box
 	//Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0.6, 1.85, 3.7)), 0);
-	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, 0)), 0);
+	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -1)), 0);
 	Model f1("./model/floor/floor.obj", 
 		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
 	Model f2("./model/floor/floor.obj",
@@ -421,7 +421,7 @@ int main() {
 	}
 	std::cout << "Load " << lights.size() << " lights" << std::endl;
 
-	int renderCase = 1; // 0: GPU, 1: CPU
+	int renderCase = 0; // 0: GPU, 1: CPU
 	if (renderCase == 0) {
 		ComputeShader cs("./shaders/ray_tracing.comp");
 		VFShader render("./shaders/render.vert", "./shaders/render.frag");
@@ -429,6 +429,8 @@ int main() {
 		cs.use();
 		cs.setInt("SCREEN_WIDTH", SCREEN_WIDTH);
 		cs.setInt("SCREEN_HEIGHT", SCREEN_HEIGHT);
+		cs.setInt("lightsSize", lights.size());
+		cs.setFloat("lightsSumArea", lights[lights.size() - 1].prefixArea);
 
 		c1 = clock();
 		// 将数据存放到缓冲纹理中并传输到着色器中
@@ -596,10 +598,12 @@ int main() {
 
 		const unsigned int WORK_BLOCK_SIZE = 32;
 		float lastTime = glfwGetTime(), deltaTime;
+		unsigned int frameCount = 0;
 		while (!glfwWindowShouldClose(window)) {
 			float currentTime = glfwGetTime();
 			deltaTime = currentTime - lastTime;
 			lastTime = currentTime;
+			frameCount += deltaTime;
 			std::string fps = "COMPUTE_SHADER FPS: " + std::to_string(1.0 / deltaTime);
 			glfwSetWindowTitle(window, fps.c_str());
 
@@ -611,7 +615,8 @@ int main() {
 				camera.lowerLeftCorner.y, camera.lowerLeftCorner.z);
 			cs.setVec3f("camera.horizontal", camera.horizontal.x, camera.horizontal.y, camera.horizontal.z);
 			cs.setVec3f("camera.vertical", camera.vertical.x, camera.vertical.y, camera.vertical.z);
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, debugtbo);
+			cs.setUInt("frameCount", (GLuint)frameCount); // 根据glfwGetTime更新当前帧随机数种子
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, debugtbo);
 			glDispatchCompute(SCREEN_WIDTH / WORK_BLOCK_SIZE + 1, SCREEN_HEIGHT / WORK_BLOCK_SIZE + 1, 1);
 
 			glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);

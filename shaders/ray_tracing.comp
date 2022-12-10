@@ -5,7 +5,8 @@ layout(local_size_x = 32, local_size_y = 32) in;
 #define FLOAT_MAX 10000000.0
 #define FLOAT_MIN -10000000.0
 #define PI 3.1415926535897
-#define INVPI 0.318309886183
+#define InvPI 0.318309886183
+#define ShadowEpsilon 0.0001
 
 struct Vertex {
 	vec3 position;
@@ -23,7 +24,6 @@ struct Material {
 	float sheen, sheenTint, clearcoat;
 	float clearcoatGloss, IOR, transmission;
 };
-
 
 struct Bound {
 	vec3 pMin;
@@ -79,15 +79,17 @@ struct Camera{
 #define BVHNODE_VEC3_COUNT 4
 #define LIGHT_VEC3_COUNT 1
 
-layout(binding = 0, rgba32f) writeonly uniform image2D output_image;
+layout(binding = 0, rgba32f) uniform image2D output_image;
 
 layout(binding = 0) uniform samplerBuffer vertices;
 layout(binding = 1) uniform samplerBuffer materials;
 layout(binding = 2) uniform samplerBuffer triangles;
 layout(binding = 3) uniform samplerBuffer bvh_nodes;
 layout(binding = 4) uniform samplerBuffer lights;
+uniform int lightsSize; // lights元素个数
+uniform float lightsSumArea; // lights表面积总和
 
-uniform sampler2D textures[20];
+uniform sampler2D textures[20]; // 物体纹理
 
 Vertex GetVertex(int i) {
 	int offset = i * VERTEX_VEC3_COUNT;
@@ -98,6 +100,15 @@ Vertex GetVertex(int i) {
 	vertex.bitangent = texelFetch(vertices, offset + 3).rgb;
 	vertex.texcoord  = texelFetch(vertices, offset + 4).rg;
 	return vertex;
+}
+vec3 GetVertexPosition(int i) {
+	int offset = i * VERTEX_VEC3_COUNT;
+	return texelFetch(vertices, offset + 0).rgb;
+}
+
+vec3 GetVertexNormal(int i) {
+	int offset = i * VERTEX_VEC3_COUNT;
+	return texelFetch(vertices, offset + 1).rgb;
 }
 
 Material GetMaterial(int i) {
@@ -164,7 +175,7 @@ uniform int SCREEN_WIDTH;
 uniform int SCREEN_HEIGHT;
 uniform Camera camera;
 
-layout(binding = 0) buffer debug_output{
+layout(binding = 1) buffer debug_output{
 	float debug_data[];
 };
 
@@ -197,6 +208,23 @@ void swap(inout float f1, inout float f2) {
 	float t = f1;
 	f1 = f2;
 	f2 = t;
+}
+
+// 输入随机数u[0, 1], 根据u和灯的表面积的一维分布选出灯光
+int GetLightIndex(float u) {
+	if (lightsSize == 0) return -1;
+	int L = 0, R = lightsSize - 1, ans = -1;
+	float randomArea = u * lightsSumArea;
+	while (L <= R) { 
+		int mid = L + R >> 1;
+		if (GetLight(mid).prefixArea >= randomArea) {
+			ans = mid;
+			R = mid - 1;
+		} else {
+			L = mid + 1;
+		}
+	}
+	return GetLight(ans).index;
 }
 
 // PBRT3中的三角形求交方法
@@ -294,7 +322,7 @@ bool TriangleIntersect(in Triangle tri, inout Ray ray, out Interaction isect) {
 	if (dot(nHit, ray.dir) > 0) {
 		nHit = -nHit;
 	}
-
+	nHit = normalize(nHit);
 	isect.position = b0 * p0 + b1 * p1 + b2 * p2;
 	isect.normal = nHit;
 	isect.texcoord = uvHit;
@@ -305,7 +333,76 @@ bool TriangleIntersect(in Triangle tri, inout Ray ray, out Interaction isect) {
 	return true;
 }
 
-int debug_n;
+// 只进行相交测试
+bool TriangleIntersectP(in Triangle tri, in Ray ray) {
+	const Vertex v0 = GetVertex(tri.indices[0]);
+	const Vertex v1 = GetVertex(tri.indices[1]);
+	const Vertex v2 = GetVertex(tri.indices[2]);
+
+	vec3 p0 = v0.position;
+	vec3 p1 = v1.position;
+	vec3 p2 = v2.position;
+
+	// 变换坐标系：光线原点在(0, 0, 0), 方向指向+z轴
+	vec3 P0 = p0 - ray.origin;
+	vec3 P1 = p1 - ray.origin;
+	vec3 P2 = p2 - ray.origin;
+	vec3 rd = ray.dir;
+	// 光线z方向为0，选取另外两个最长的轴进行交换
+	if (rd.z == 0) {
+		if (abs(rd.x) > abs(rd.y)) {
+			swap(P0.x, P0.z);
+			swap(P1.x, P1.z);
+			swap(P2.x, P2.z);
+			swap(rd.x, rd.z);
+		}
+		else {
+			swap(P0.y, P0.z);
+			swap(P1.y, P1.z);
+			swap(P2.y, P2.z);
+			swap(rd.y, rd.z);
+		}
+	}
+	// 错切变换，射线方向与+z轴对齐
+	float invDz = 1.f / rd.z;
+	P0.x = P0.x - P0.z * rd.x * invDz;
+	P0.y = P0.y - P0.z * rd.y * invDz;
+	P0.z *= invDz;
+	P1.x = P1.x - P1.z * rd.x * invDz;
+	P1.y = P1.y - P1.z * rd.y * invDz;
+	P1.z *= invDz;
+	P2.x = P2.x - P2.z * rd.x * invDz;
+	P2.y = P2.y - P2.z * rd.y * invDz;
+	P2.z *= invDz;
+
+	// 边函数：由 p0 和 p1以及给定的第三点p指定的三角形面积的两倍
+	float e0 = P1.x * P2.y - P1.y * P2.x;
+	float e1 = P2.x * P0.y - P2.y * P0.x;
+	float e2 = P0.x * P1.y - P0.y * P1.x;
+	// 交点落在三角形外
+	if ((e0 < 0 || e1 < 0 || e2 < 0) && (e0 > 0 || e1 > 0 || e2 > 0)) {
+		return false;
+	}
+
+	// 交点落在三角形外
+	if ((e0 < 0 || e1 < 0 || e2 < 0) && (e0 > 0 || e1 > 0 || e2 > 0)) return false;
+
+	// 三角形三点共线
+	float det = e0 + e1 + e2;
+	if (det == 0) return false;
+
+	/* 
+		重心坐标：bi = ei / (e0 + e1 + e2) = bi / det
+		插值后z = simga(bi * zi) = sigma(ei * zi) / det
+		避免除法误差 判断z在光线范围内用sigma(ei * zi)与ray.tMax * det进行比较
+	*/
+	float tScaled = e0 * P0.z + e1 * P1.z + e2 * P2.z;
+	if (det > 0 && (tScaled <= 0 || tScaled > ray.tMax * det)) return false;
+	if (det < 0 && (tScaled >= 0 || tScaled < ray.tMax * det)) return false;
+
+	return true;
+}
+
 bool BVHIntersect(inout Ray r, out Interaction isect) {
 	// 把将要访问的节点压入栈中
 	int nodeStack[128], top = 0;
@@ -340,20 +437,155 @@ bool BVHIntersect(inout Ray r, out Interaction isect) {
 	return hit;
 }
 
+// 只进行相交测试
+bool BVHIntersectP(inout Ray r) {
+	// 把将要访问的节点压入栈中
+	int nodeStack[128], top = 0;
+	nodeStack[top++] = 0;
+	while (top > 0) {
+		const int curId = nodeStack[--top];
+		const BVHNode node = GetBVHNode(curId);
+		// 未击中该点包围盒则跳过
+		if (!BoundIntersect(node.bound, r)) continue;
+		if (node.rightChild == -1) { // 叶子节点
+			for (int i = node.startIndex; i < node.endIndex; ++i) { // 每个三角形求交
+				if (TriangleIntersectP(GetTriangle(i), r)) {
+					return true;
+				}
+			}
+		} else { // 非叶子节点
+			// 在划分轴上光线方向为负方向，则需要先访问右儿子
+			if (r.dir[node.axis] < 0) {
+				nodeStack[top++] = curId + 1;
+				// 判断是否击中另一个儿子的包围盒
+				BVHNode rc = GetBVHNode(node.rightChild);
+				if (BoundIntersect(rc.bound, r)) nodeStack[top++] = node.rightChild;
+			} else {
+				nodeStack[top++] = node.rightChild;
+				BVHNode lc = GetBVHNode(curId + 1);
+				if (BoundIntersect(lc.bound, r)) nodeStack[top++] = curId + 1;
+			}
+		}
+	}
+	return false;
+}
 
+uniform uint frameCount; // 用已经显示的总帧数和作为当前帧随机数种子
+uint seed; // 实际参与运算的种子
 
+uint wang_hash(inout uint seed) { // 迭代更新种子
+    seed = uint(seed ^ uint(61)) ^ uint(seed >> uint(16));
+    seed *= uint(9);
+    seed = seed ^ (seed >> 4);
+    seed *= uint(0x27d4eb2d);
+    seed = seed ^ (seed >> 15);
+    return seed;
+}
+ 
+float Rand0To1() {
+    return float(wang_hash(seed)) / 4294967296.0;
+}
+
+// 在切线空间下进行单位半球采样
+vec3 UniformSampleHemisphere(in vec2 u) {
+    float z = u[0];
+    float r = sqrt(max(0.f, 1.f - z * z));
+    float phi = 2 * PI * u[1];
+    return vec3(r * cos(phi), r * sin(phi), z);
+}
+
+// 在三角形上采样，返回重心坐标
+vec2 UniformSampleTriangle(in vec2 u) {
+	float su0 = sqrt(u[0]);
+	return vec2(1 - su0, u[1] * su0);
+}
+
+// 在三角形上采样，返回采样点信息
+Interaction TriangleSample(in Triangle tri, in vec2 u) {
+	vec2 b = UniformSampleTriangle(u);
+	const vec3 p0 = GetVertexPosition(tri.indices[0]);
+	const vec3 p1 = GetVertexPosition(tri.indices[1]);
+	const vec3 p2 = GetVertexPosition(tri.indices[2]);
+	const vec3 n0 = GetVertexNormal(tri.indices[0]);
+	const vec3 n1 = GetVertexNormal(tri.indices[1]);
+	const vec3 n2 = GetVertexNormal(tri.indices[2]);
+	Interaction res;
+	res.position = p0 * b[0] + p1 * b[1] + p2 * (1.f - b[0] - b[1]);
+	if (n0 == vec3(0) || n1 == vec3(0) || n2 == vec3(0)) {
+		res.normal = normalize(cross(p1 - p0, p2 - p0));
+	} else {
+		res.normal = n0 * b[0] + n1 * b[1] + n2 * (1.f - b[0] - b[1]);
+	}
+	res.normal = normalize(res.normal);
+	res.texcoord = b;
+	res.textureId = tri.textureId;
+	res.materialId = tri.materialId;
+	return res;
+}
+
+vec3 DiffuseBRDF(in vec3 n, in vec3 wo, in Material m, out vec3 wi, out float pdf) {
+    vec3 t; // 切线
+    if (n.z > 0.9999995f) t = vec3(1.f, 0.f, 0.f);
+    else t = normalize(cross(n, wo));
+    vec3 b = cross(n, t); // 次切线
+    vec3 wi_t = UniformSampleHemisphere(vec2(Rand0To1(), Rand0To1()));
+    pdf = InvPI;
+    // 从切线空间转为世界空间
+    wi = vec3(t[0] * wi_t[0] + t[1] * wi_t[1] + t[2] * wi_t[2],
+              b[0] * wi_t[0] + b[1] * wi_t[1] + b[2] * wi_t[2],
+              n[0] * wi_t[0] + n[1] * wi_t[1] + n[2] * wi_t[2]);
+    return m.baseColor * InvPI;
+}
+
+ivec2 imagePos;
+vec3 Lo(in Interaction isect, in vec3 wo) {
+	const vec3 p = isect.position;
+	const vec3 n = isect.normal;
+	Material material = GetMaterial(isect.materialId);
+	if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
+		material.baseColor = texture(textures[isect.textureId], vec2(isect.texcoord)).rgb;
+	}
+	vec3 wi;
+	float pdf;
+	// BRDF项，返回函数值，采样方向和概率
+	vec3 f = DiffuseBRDF(n, wo, material, wi, pdf); 
+	// 自发光
+	vec3 LDirect = material.emssive;
+	// 其他灯光的直接光照
+	int triIndex = GetLightIndex(Rand0To1());
+	if (triIndex != -1) { // 找到其中一个灯光
+		// 在该三角形上采样
+		const Triangle tri = GetTriangle(triIndex);
+		Interaction triangleIsect = TriangleSample(tri, vec2(Rand0To1(), Rand0To1()));
+		// 发射阴影射线，判断灯光与当前点之间有无遮挡
+		Ray r;
+		r.dir = triangleIsect.position - p;
+		r.tMax = 1.0 - ShadowEpsilon; // 防止光线与目标物体相交
+		r.origin = p + n * 0.0001; // 防止自相交
+		if (!BVHIntersectP(r)) {
+			// pdf为所有灯光表面积的倒数
+			float lPdf = 1.f / lightsSumArea;
+			float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
+			vec3 li = GetMaterial(triangleIsect.materialId).emssive;
+			LDirect += f * li * abs(dot(n, r.dir) * dot(triangleIsect.normal, r.dir)) / (lPdf * dis2);
+		}
+	}
+	return LDirect;
+}
 
 void main() {
-	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
-	Ray ray = CameraGetRay(float(p.x) / float(SCREEN_WIDTH), float(p.y) / float(SCREEN_HEIGHT));
+	seed = frameCount; // 初始化种子
+	imagePos = ivec2(gl_GlobalInvocationID.xy);
+	Ray ray = CameraGetRay(float(imagePos.x) / float(SCREEN_WIDTH), float(imagePos.y) / float(SCREEN_HEIGHT));
 	Interaction isect;
 	if (BVHIntersect(ray, isect)) {
-		vec3 color;
-		if (isect.textureId != -1) {
-			color = texture(textures[isect.textureId], vec2(isect.texcoord)).rgb;
-		} else {
-			color = GetMaterial(isect.materialId).baseColor;
-		}
-		imageStore(output_image, p, vec4(color, 1.0));
-	} 
+		vec3 color = Lo(isect, -ray.dir);
+		color = clamp(color, vec3(0), vec3(1));
+		// 多帧混合
+		vec3 preColor = imageLoad(output_image, imagePos).rgb;
+		imageStore(output_image, imagePos, vec4(mix(preColor, color, 1.0 / (frameCount + 1)), 1.0));
+	} else {
+		imageStore(output_image, imagePos, vec4(0));
+	}
+
 }
