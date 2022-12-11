@@ -310,40 +310,78 @@ void renderQuad() {
 	glBindVertexArray(0);
 }
 
-glm::vec3 Lo(const Interaction& isect, const glm::vec3& wo, const BVH& bvhaccel) {
-	const glm::vec3& p = isect.position;
-	const glm::vec3& n = isect.normal;
-	Material material = materials[isect.materialId];
-	if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
-		material.baseColor = TextureGetColor1(isect.textureId, isect.texcoord[0], isect.texcoord[1]);
-	}
-	glm::vec3 wi;
+struct BounceLi {
+	glm::vec3 Li = glm::vec3(0);
+	glm::vec3 f = glm::vec3(0);
+	float cosTheta;
 	float pdf;
-	// BRDF项，返回函数值，采样方向和概率
-	glm::vec3 f = DiffuseBRDF(n, wo, material, &wi, &pdf); 
-	// 自发光
-	glm::vec3 LDirect = material.emssive;
-	// 其他灯光的直接光照
-	int triIndex = GetLightIndex(Rand0To1());
-	if (triIndex != -1) { // 找到其中一个灯光
-		// 在该三角形上采样
-		const Triangle& tri = bvhaccel.triangles[triIndex];
-		Interaction triangleIsect = TriangleSample(tri, glm::vec2(Rand0To1(), Rand0To1()), bvhaccel.vertices);
-		// 发射阴影射线，判断灯光与当前点之间有无遮挡
-		Ray r;
-		r.dir = triangleIsect.position - p;
-		r.tMax = 1.f - ShadowEpsilon; // 防止光线与目标物体相交
-		r.origin = p + n * 0.0001f; // 防止自相交
-		if (!bvhaccel.IntersectP(r)) {
-			// pdf为所有灯光表面积的倒数
-			float lPdf = 1.f / lights[lights.size() - 1].prefixArea;
-			float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
-			const glm::vec3& li = materials[triangleIsect.materialId].emssive;
-			LDirect += f * li * std::abs(glm::dot(n, r.dir) * glm::dot(triangleIsect.normal, r.dir)) / 
-				(lPdf * dis2);
+	float pR;
+};
+const int maxBounceDepth = 4;
+glm::vec3 Li(const Ray& reye, const BVH& bvhaccel) {
+	Ray ray = reye;
+	Interaction isect;
+	glm::vec3 result(0);
+	// res[i]: 光线第i次弹射时，采样得到的直接光照，所在交点的BRDF，
+	// 采样得到下一次光线方向wi与法线夹角的cos值和pdf，俄罗斯轮盘赌的概率pR
+	BounceLi res[maxBounceDepth];
+	int bounce = 0;
+	while (1) {
+		if (!bvhaccel.Intersect(ray, &isect)) {
+			break;
+		}
+		const glm::vec3& p = isect.position;
+		const glm::vec3& n = isect.normal;
+		const glm::vec3& wo = -ray.dir;
+		Material material = materials[isect.materialId];
+		if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
+			material.baseColor = TextureGetColor1(isect.textureId, isect.texcoord[0], isect.texcoord[1]);
+		}
+		glm::vec3 wi;
+		float pdf;
+		// BRDF项，返回函数值，采样方向和概率
+		glm::vec3 f = DiffuseBRDF(n, wo, material, &wi, &pdf);
+		// 自发光，只在第一次bounce接受物体的自发光
+		glm::vec3 LDirect = bounce == 0 ? material.emssive : glm::vec3(0);
+		// 其他灯光的直接光照
+		int triIndex = GetLightIndex(Rand0To1());
+		if (triIndex != -1) { // 找到其中一个灯光
+			// 在该三角形上采样
+			const Triangle& tri = bvhaccel.triangles[triIndex];
+			Interaction triangleIsect = TriangleSample(tri, glm::vec2(Rand0To1(), Rand0To1()), bvhaccel.vertices);
+			// 发射阴影射线，判断灯光与当前点之间有无遮挡
+			Ray r;
+			r.dir = triangleIsect.position - p;
+			r.tMax = 1.f - ShadowEpsilon; // 防止光线与目标物体相交
+			r.origin = p + n * 0.0001f; // 防止自相交
+			if (!bvhaccel.IntersectP(r)) {
+				// pdf为所有灯光表面积的倒数
+				float lPdf = 1.f / lights[lights.size() - 1].prefixArea;
+				float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
+				const glm::vec3& li = materials[triangleIsect.materialId].emssive;
+				LDirect += f * li * std::abs(glm::dot(n, r.dir) * glm::dot(triangleIsect.normal, r.dir)) /
+					(lPdf * dis2);
+			}
+		}
+		
+		// 俄罗斯轮盘赌决定是否计算间接光
+		float pR = 0.85;
+		res[bounce] = { LDirect, f, std::abs(glm::dot(n, wi)), pdf, pR };
+		if (Rand0To1() <= pR && bounce + 1 < maxBounceDepth) {
+			ray.origin = p + n * 0.0001f;
+			ray.dir = wi;
+			ray.tMax = FLOAT_MAX;
+			++bounce;
+		} else {
+			break;
 		}
 	}
-	return LDirect;
+	if (bounce == 0) return res[0].Li;
+	for (int i = bounce - 1; i >= 0; --i) {
+		// 当前弹射所接受的光照等于直接光照加间接光照，下一次弹射的直接光照作为当前的间接光照
+		res[i].Li += res[i].f * res[i + 1].Li * res[i].cosTheta / (res[i].pdf * (1.f - res[i].pR));
+	}
+	return res[0].Li;
 }
 
 int main() {
@@ -363,7 +401,7 @@ int main() {
 	m.baseColor = glm::vec3(0.12, 0.45, 0.15);
 	materials.push_back(m);
 	m.baseColor = glm::vec3(0.1);
-	m.emssive = glm::vec3(2);
+	m.emssive = glm::vec3(1.2);
 	materials.push_back(m);
 
 	// Cornell Box
@@ -421,7 +459,7 @@ int main() {
 	}
 	std::cout << "Load " << lights.size() << " lights" << std::endl;
 
-	int renderCase = 0; // 0: GPU, 1: CPU
+	int renderCase = 1; // 0: GPU, 1: CPU
 	if (renderCase == 0) {
 		ComputeShader cs("./shaders/ray_tracing.comp");
 		VFShader render("./shaders/render.vert", "./shaders/render.frag");
@@ -634,7 +672,7 @@ int main() {
 	} else {
 		c1 = clock();
 		int pixelCount = 0;
-		for (int j = 0; j < SCREEN_HEIGHT; ++j)  {
+		for (int j = 0; j < SCREEN_HEIGHT; ++j) {
 			for (int i = 0; i < SCREEN_WIDTH; ++i) {
 				++pixelCount;
 				std::cerr << (float)pixelCount / (SCREEN_HEIGHT * SCREEN_WIDTH) << std::endl;
@@ -642,28 +680,18 @@ int main() {
 				ray.dir = glm::normalize(ray.dir);
 				Interaction isect;
 				int dataPos = camera.nChannels * ((SCREEN_HEIGHT - j - 1) * SCREEN_WIDTH + i);
-				if (bvhaccel->Intersect(ray, &isect)) {
-					/*glm::vec3 color = materials[isect.materialId].baseColor * 255.f;
-					if (isect.textureId != -1) {
-						color = TextureGetColor255(isect.textureId, isect.texcoord[0], isect.texcoord[1]);
-					} */
-					if (i == 153 && j == 3) {
-						std::cout << "break!" << std::endl;
-					}
-					const int SAMPLE_COUNT = 30;
-					glm::vec3 color;
-					for (int s = 0; s < SAMPLE_COUNT; ++s) {
-						color += Lo(isect, -ray.dir, *bvhaccel);
-					}
-					color /= SAMPLE_COUNT;
-					camera.data[dataPos + 0] = Clamp(color[0] * 255, 0, 255);
-					camera.data[dataPos + 1] = Clamp(color[1] * 255, 0, 255);
-					camera.data[dataPos + 2] = Clamp(color[2] * 255, 0, 255);
-				} else {
-					camera.data[dataPos + 0] = 0;
-					camera.data[dataPos + 1] = 0;
-					camera.data[dataPos + 2] = 0;
+				if (i == 153 && j == 3) {
+					std::cout << "break!" << std::endl;
 				}
+				const int SAMPLE_COUNT = 30;
+				glm::vec3 color;
+				for (int s = 0; s < SAMPLE_COUNT; ++s) {
+					color += Li(ray, *bvhaccel);
+				}
+				color /= SAMPLE_COUNT;
+				camera.data[dataPos + 0] = Clamp(color[0] * 255, 0, 255);
+				camera.data[dataPos + 1] = Clamp(color[1] * 255, 0, 255);
+				camera.data[dataPos + 2] = Clamp(color[2] * 255, 0, 255);
 			}
 		}
 		c2 = clock();
