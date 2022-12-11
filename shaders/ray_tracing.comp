@@ -538,54 +538,102 @@ vec3 DiffuseBRDF(in vec3 n, in vec3 wo, in Material m, out vec3 wi, out float pd
 }
 
 ivec2 imagePos;
-vec3 Lo(in Interaction isect, in vec3 wo) {
-	const vec3 p = isect.position;
-	const vec3 n = isect.normal;
-	Material material = GetMaterial(isect.materialId);
-	if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
-		material.baseColor = texture(textures[isect.textureId], vec2(isect.texcoord)).rgb;
-	}
-	vec3 wi;
+
+struct BounceLi {
+	vec3 Li;
+	vec3 f;
+	float cosTheta;
 	float pdf;
-	// BRDF项，返回函数值，采样方向和概率
-	vec3 f = DiffuseBRDF(n, wo, material, wi, pdf); 
-	// 自发光
-	vec3 LDirect = material.emssive;
-	// 其他灯光的直接光照
-	int triIndex = GetLightIndex(Rand0To1());
-	if (triIndex != -1) { // 找到其中一个灯光
-		// 在该三角形上采样
-		const Triangle tri = GetTriangle(triIndex);
-		Interaction triangleIsect = TriangleSample(tri, vec2(Rand0To1(), Rand0To1()));
-		// 发射阴影射线，判断灯光与当前点之间有无遮挡
-		Ray r;
-		r.dir = triangleIsect.position - p;
-		r.tMax = 1.0 - ShadowEpsilon; // 防止光线与目标物体相交
-		r.origin = p + n * 0.0001; // 防止自相交
-		if (!BVHIntersectP(r)) {
-			// pdf为所有灯光表面积的倒数
-			float lPdf = 1.f / lightsSumArea;
-			float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
-			vec3 li = GetMaterial(triangleIsect.materialId).emssive;
-			LDirect += f * li * abs(dot(n, r.dir) * dot(triangleIsect.normal, r.dir)) / (lPdf * dis2);
-		}
+	float pR;
+};
+
+#define MAX_BOUNCE_DEPTH 3
+BounceLi res[MAX_BOUNCE_DEPTH];
+
+vec3 Li(in Ray reye) {
+	Ray ray = reye;
+	Interaction isect;
+	// res[i]: 光线第i次弹射时，采样得到的直接光照，所在交点的BRDF，
+	// 采样得到下一次光线方向wi与法线夹角的cos值和pdf，俄罗斯轮盘赌的概率pR
+	
+	for (int i = 0; i < MAX_BOUNCE_DEPTH; ++i) { // 清空数组
+		res[i].Li = vec3(0.0);
+		res[i].f = vec3(0.0);
+		res[i].cosTheta = 0.0;
+		res[i].pdf = 0.0;
+		res[i].pR = 0.0;
 	}
-	return LDirect;
+	int finalBounce = MAX_BOUNCE_DEPTH - 1;
+	for(int bounce = 0; bounce < MAX_BOUNCE_DEPTH; ++bounce) {
+		if (!BVHIntersect(ray, isect)) {
+			res[bounce].Li = vec3(0.0);
+			finalBounce = bounce;
+			break;
+		}
+		const vec3 p = isect.position;
+		const vec3 n = isect.normal;
+		const vec3 wo = -ray.dir;
+		Material material = GetMaterial(isect.materialId);
+		if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
+			material.baseColor = texture(textures[isect.textureId], isect.texcoord).rgb;
+		}
+		vec3 wi;
+		float pdf;
+		// BRDF项，返回函数值，采样方向和概率
+		vec3 f = DiffuseBRDF(n, wo, material, wi, pdf); 
+		// 自发光
+		vec3 LDirect = material.emssive;
+		// 其他灯光的直接光照
+		int triIndex = GetLightIndex(Rand0To1());
+		if (triIndex != -1) { // 找到其中一个灯光
+			// 在该三角形上采样
+			const Triangle tri = GetTriangle(triIndex);
+			Interaction triangleIsect = TriangleSample(tri, vec2(Rand0To1(), Rand0To1()));
+			// 发射阴影射线，判断灯光与当前点之间有无遮挡
+			Ray r;
+			r.dir = triangleIsect.position - p;
+			r.tMax = 1.0 - ShadowEpsilon; // 防止光线与目标物体相交
+			r.origin = p + n * 0.0001; // 防止自相交
+			if (!BVHIntersectP(r)) {
+				// pdf为所有灯光表面积的倒数
+				float lPdf = 1.f / lightsSumArea;
+				float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
+				vec3 li = GetMaterial(triangleIsect.materialId).emssive;
+				LDirect += f * li * abs(dot(n, r.dir) * dot(triangleIsect.normal, r.dir)) / (lPdf * dis2);
+			}
+		}
+		// 俄罗斯轮盘赌决定是否计算间接光
+		float pR = 0.85;
+		res[bounce].Li = LDirect;
+		res[bounce].f = f;
+		res[bounce].cosTheta = abs(dot(n, wi));
+		res[bounce].pdf = pdf;
+		res[bounce].pR = pR;
+		float rR = Rand0To1();
+		int tmp = int(1.0 - step(pR, rR));
+		finalBounce = (1 - tmp) * bounce + tmp * finalBounce; 
+		ray.origin = p + n * 0.0001f;
+		ray.dir = wi;
+		ray.tMax = FLOAT_MAX;
+	}
+	
+	debug_data[imagePos.x] = finalBounce;
+	for (int i = finalBounce - 1; i >= 0; --i) {
+		// 当前弹射所接受的光照等于直接光照加间接光照，下一次弹射的直接光照作为当前的间接光照
+		res[i].Li += res[i].f * res[i + 1].Li * res[i].cosTheta / (res[i].pdf * (1.0 - res[i].pR));
+	}
+	return res[0].Li;
 }
 
 void main() {
-	seed = frameCount; // 初始化种子
 	imagePos = ivec2(gl_GlobalInvocationID.xy);
+	seed = uint(uint(imagePos.x) * uint(1973) + 
+				uint(imagePos.y) * uint(9277) + 
+				uint(frameCount) * uint(26699)) | uint(1); // 初始化种子
 	Ray ray = CameraGetRay(float(imagePos.x) / float(SCREEN_WIDTH), float(imagePos.y) / float(SCREEN_HEIGHT));
-	Interaction isect;
-	if (BVHIntersect(ray, isect)) {
-		vec3 color = Lo(isect, -ray.dir);
-		color = clamp(color, vec3(0), vec3(1));
-		// 多帧混合
-		vec3 preColor = imageLoad(output_image, imagePos).rgb;
-		imageStore(output_image, imagePos, vec4(mix(preColor, color, 1.0 / (frameCount + 1)), 1.0));
-	} else {
-		imageStore(output_image, imagePos, vec4(0));
-	}
-
+	vec3 color = Li(ray);
+	color = clamp(color, vec3(0), vec3(1));
+	// 多帧混合
+	vec3 preColor = imageLoad(output_image, imagePos).rgb;
+	imageStore(output_image, imagePos, vec4(mix(preColor, color, 1.0 / float(frameCount + 1)), 1.0));
 }

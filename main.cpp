@@ -401,12 +401,12 @@ int main() {
 	m.baseColor = glm::vec3(0.12, 0.45, 0.15);
 	materials.push_back(m);
 	m.baseColor = glm::vec3(0.1);
-	m.emssive = glm::vec3(1.2);
+	m.emssive = glm::vec3(1);
 	materials.push_back(m);
 
 	// Cornell Box
 	//Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0.6, 1.85, 3.7)), 0);
-	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -1)), 0);
+	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -0.5)), 0);
 	Model f1("./model/floor/floor.obj", 
 		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
 	Model f2("./model/floor/floor.obj",
@@ -459,7 +459,7 @@ int main() {
 	}
 	std::cout << "Load " << lights.size() << " lights" << std::endl;
 
-	int renderCase = 1; // 0: GPU, 1: CPU
+	int renderCase = 0; // 0: GPU, 1: CPU
 	if (renderCase == 0) {
 		ComputeShader cs("./shaders/ray_tracing.comp");
 		VFShader render("./shaders/render.vert", "./shaders/render.frag");
@@ -636,12 +636,12 @@ int main() {
 
 		const unsigned int WORK_BLOCK_SIZE = 32;
 		float lastTime = glfwGetTime(), deltaTime;
-		unsigned int frameCount = 0;
+		unsigned int frameCount = 1;
 		while (!glfwWindowShouldClose(window)) {
 			float currentTime = glfwGetTime();
 			deltaTime = currentTime - lastTime;
 			lastTime = currentTime;
-			frameCount += deltaTime;
+			++frameCount;
 			std::string fps = "COMPUTE_SHADER FPS: " + std::to_string(1.0 / deltaTime);
 			glfwSetWindowTitle(window, fps.c_str());
 
@@ -653,7 +653,7 @@ int main() {
 				camera.lowerLeftCorner.y, camera.lowerLeftCorner.z);
 			cs.setVec3f("camera.horizontal", camera.horizontal.x, camera.horizontal.y, camera.horizontal.z);
 			cs.setVec3f("camera.vertical", camera.vertical.x, camera.vertical.y, camera.vertical.z);
-			cs.setUInt("frameCount", (GLuint)frameCount); // 根据glfwGetTime更新当前帧随机数种子
+			cs.setUInt("frameCount", frameCount); // 根据glfwGetTime更新当前帧随机数种子
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, debugtbo);
 			glDispatchCompute(SCREEN_WIDTH / WORK_BLOCK_SIZE + 1, SCREEN_HEIGHT / WORK_BLOCK_SIZE + 1, 1);
 
@@ -683,7 +683,7 @@ int main() {
 				if (i == 153 && j == 3) {
 					std::cout << "break!" << std::endl;
 				}
-				const int SAMPLE_COUNT = 30;
+				const int SAMPLE_COUNT = 50;
 				glm::vec3 color;
 				for (int s = 0; s < SAMPLE_COUNT; ++s) {
 					color += Li(ray, *bvhaccel);
