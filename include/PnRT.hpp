@@ -10,6 +10,9 @@
 #endif
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
+#include "ImGui/imgui.h"
+#include "ImGui/imgui_impl_glfw.h"
+#include "ImGui/imgui_impl_opengl3.h"
 #include "glm/glm.hpp"
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtc/type_ptr.hpp"
@@ -25,13 +28,17 @@
 #include <set>
 #include <algorithm>
 
+#pragma comment(lib, "./lib/glfw3.lib")
+#pragma comment(lib, "./lib/assimp-vc143-mt.lib")
+#pragma comment(lib, "Opengl32.lib")
+
 constexpr float FLOAT_MIN = std::numeric_limits<float>::lowest();
 constexpr float FLOAT_MAX = std::numeric_limits<float>::max();
 constexpr float PI = 3.14159265358979323846;
 constexpr float InvPI = 0.31830988618379067154;
 constexpr float ShadowEpsilon = 0.0001f;
-constexpr int SCREEN_WIDTH = 1600;
-constexpr int SCREEN_HEIGHT = 900;
+constexpr int SCREEN_WIDTH = 512;
+constexpr int SCREEN_HEIGHT = 512;
 
 // count of float
 constexpr int VERTEX_SIZE = 15;
@@ -95,6 +102,7 @@ struct Light;
 struct Mesh;
 class Model;
 class Shader;
+class ImGuiLayer;
 
 
 // resource

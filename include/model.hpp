@@ -19,20 +19,24 @@ struct Mesh {
 
 class Model {
 public:
-	Model(const std::string& path, const glm::mat4& modelMatrix, unsigned int materialId)
-		: modelMatrix(modelMatrix), materialId(materialId) {
+	Model(const std::string& path, const glm::mat4& modelMatrix, const Material& material, const std::string& name)
+		: modelMatrix(modelMatrix), materialId(materialId), name(name) {
 		Assimp::Importer importer;
 		const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_CalcTangentSpace);
 		if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
 			std::cout << "ERROR::ASSIMP::" << importer.GetErrorString() << std::endl;
 			return;
 		}		
-		directory = path.substr(0, path.find_last_of('/'));
+
+		directory = path.substr(0, path.find_last_of('/'));		
+		materialId = materials.size();
+		materials.push_back(material);
 		processNode(scene->mRootNode, scene);
 	}
 	std::vector<Mesh> meshes;
 	glm::mat4 modelMatrix;
 	int materialId;
+	std::string name;
 private:
 	std::string directory; // 模型所在路径，用于读取纹理所在位置
 	void processNode(const aiNode* node, const aiScene* scene) {

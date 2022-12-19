@@ -1,11 +1,11 @@
 #include "PnRT.hpp"
-#include "bound.hpp"
-#include "triangle.hpp"
+#include "BVH.hpp"
 #include "camera.hpp"
 #include "model.hpp"
 #include "shader.hpp"
 #include "light.hpp"
 #include "BSDF.hpp"
+#include "ImGuiLayer.hpp"
 
 void APIENTRY glDebugOutput(GLenum source,
 	GLenum type,
@@ -50,7 +50,7 @@ void APIENTRY glDebugOutput(GLenum source,
 }
 
 GLFWwindow* window;
-void GLFWInit() {
+void WindowInit() {
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
@@ -64,6 +64,7 @@ void GLFWInit() {
 		exit(-1);
 	}
 	glfwMakeContextCurrent(window);
+	glfwSwapInterval(0);
 
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
 		std::cout << "Failed to initialize GLAD" << std::endl;
@@ -77,185 +78,11 @@ void GLFWInit() {
 		glDebugMessageCallback(glDebugOutput, nullptr);
 		glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
 	}
+
+	
+
 	srand(time(0));
 }
-
-struct BVHNode {
-	Bound bound;
-	int axis;
-	int rightChild;
-	int startIndex;
-	int endIndex;
-};
-
-class BVH {
-public:
-	BVH(const std::vector<Vertex>& vertices, const std::vector<Triangle>& triangles) 
-		: vertices(vertices), triangles(triangles) {
-		BuildBVH(0, triangles.size());
-	}
-
-	bool Intersect(const Ray& r, Interaction* isect) const {
-		// 把将要访问的节点压入栈中
-		int nodeStack[128], top = 0;
-		nodeStack[top++] = 0;
-		// 判断击中标志
-		bool hit = false;
-		while (top) {
-			const int curId = nodeStack[--top];
-			const BVHNode& node = bvh[curId];
-			// 未击中该点包围盒则跳过
-			if (!BoundIntersect(node.bound, r)) continue;
-			if (node.rightChild == -1) { // 叶子节点
-				for (int i = node.startIndex; i < node.endIndex; ++i) { // 每个三角形求交
-					if (TriangleIntersect(triangles[i], r, vertices, isect)) {
-						hit = true;
-					}
-				}
-			} else { // 非叶子节点
-				// 在划分轴上光线方向为负方向，则需要先访问右儿子
-				if (r.dir[node.axis] < 0) {
-					nodeStack[top++] = curId + 1;
-					// 判断是否击中另一个儿子的包围盒
-					const BVHNode& rc = bvh[node.rightChild];
-					if (BoundIntersect(rc.bound, r)) nodeStack[top++] = node.rightChild;
-				} else {
-					nodeStack[top++] = node.rightChild;
-					const BVHNode& lc = bvh[curId + 1];
-					if (BoundIntersect(lc.bound, r)) nodeStack[top++] = curId + 1;
-				}
-			}
-		}
-		return hit;
-	}
-
-	// 只进行相交测试，不返回Interaction信息
-	bool IntersectP(const Ray& r) const {
-		// 把将要访问的节点压入栈中
-		int nodeStack[128], top = 0;
-		nodeStack[top++] = 0;
-		while (top) {
-			const int curId = nodeStack[--top];
-			const BVHNode& node = bvh[curId];
-			// 未击中该点包围盒则跳过
-			if (!BoundIntersect(node.bound, r)) continue;
-			if (node.rightChild == -1) { // 叶子节点
-				for (int i = node.startIndex; i < node.endIndex; ++i) { // 每个三角形求交
-					if (TriangleIntersectP(triangles[i], r, vertices))
-						return true;
-				}
-			} else { // 非叶子节点
-				// 在划分轴上光线方向为负方向，则需要先访问右儿子
-				if (r.dir[node.axis] < 0) {
-					nodeStack[top++] = curId + 1;
-					// 判断是否击中另一个儿子的包围盒
-					const BVHNode& rc = bvh[node.rightChild];
-					if (BoundIntersect(rc.bound, r)) nodeStack[top++] = node.rightChild;
-				} else {
-					nodeStack[top++] = node.rightChild;
-					const BVHNode& lc = bvh[curId + 1];
-					if (BoundIntersect(lc.bound, r)) nodeStack[top++] = curId + 1;
-				}
-			}
-		}
-		return false;
-	}
-private:
-	struct Bucket {
-		int nTriangles = 0;
-		Bound bound;
-	};
-
-	int BuildBVH(int L, int R, int depth = 0) {
-		// 节点编号
-		static int nodeId = -1;
-		++nodeId;
-		// 求当前节点包含的三角形构成的包围盒
-		Bound bound;
-		for (int i = L; i < R; ++i) {
-			bound.Union(triangles[i].bound);
-		}
-		int nTriangles = R - L;
-		// 叶子节点
-		if (nTriangles <= 2) {
-			bvh.push_back({ bound, -1, -1, L, R });
-			return nodeId;
-		}
-		Bound centerBound;
-		for (int i = L; i < R; ++i)
-			centerBound.Union(triangles[i].boundCenter);
-		// 取包围盒对角线最长的维度进行划分
-		glm::vec3 diagonal = centerBound.Diagonal();
-		int d;
-		if (diagonal.x >= diagonal.y && diagonal.x >= diagonal.z) d = 0;
-		else if (diagonal.y >= diagonal.x && diagonal.y >= diagonal.z) d = 1;
-		else d = 2;
-		// 包围盒大小为0当叶子节点处理
-		if (centerBound.pMax[d] == centerBound.pMin[d]) {
-			bvh.push_back({ bound, -1, -1, L, R });
-			return nodeId;
-		}
-		// 按最长的轴划分成若干个桶，根据每个三角形的包围盒中心分别装入相应的桶中
-		constexpr int BUCKETSIZE = 12;
-		Bucket buc[BUCKETSIZE];
-		for (int i = L; i < R; ++i) {
-			int pos = ((triangles[i].boundCenter[d] - centerBound.pMin[d]) / diagonal[d]) * BUCKETSIZE;
-			if (pos == BUCKETSIZE) pos = BUCKETSIZE - 1;
-			assert(pos >= 0 && pos < BUCKETSIZE);
-			buc[pos].nTriangles++;
-			buc[pos].bound.Union(triangles[i].bound);
-		}
-
-		// 取某个估计划分代价最小的桶，在该桶内和该桶左边的三角形划分到左儿子，其余划分到右儿子
-		float minCost = FLOAT_MAX;
-		int midBuc = 0;
-		for (int m = 0; m < BUCKETSIZE - 1; ++m) {
-			Bound b0, b1;
-			int c0 = 0, c1 = 0;
-			for (int i = 0; i <= m; ++i) {
-				c0 += buc[i].nTriangles;
-				b0.Union(buc[i].bound);
-			}
-			for (int i = m + 1; i < BUCKETSIZE; ++i) {
-				c1 += buc[i].nTriangles;
-				b1.Union(buc[i].bound);
-			}
-			float cost = trav + (b0.SurfaceArea() * c0 + b1.SurfaceArea() * c1) / bound.SurfaceArea();
-			if (cost < minCost) {
-				minCost = cost;
-				midBuc = m;
-			}
-		}
-
-		int mid = std::partition(triangles.begin() + L, triangles.begin() + R,
-			[&](const Triangle& t) -> bool {
-				int pos = ((t.boundCenter[d] - centerBound.pMin[d]) / diagonal[d]) * BUCKETSIZE;
-				if (pos == BUCKETSIZE) pos = BUCKETSIZE - 1;
-				return pos <= midBuc;
-			}) - triangles.begin();
-
-		float leafCost = nTriangles;
-		// 叶子节点：三角形个数小于限制，并且访问叶子花费小于划分后的花费
-		if (nTriangles <= maxTrianglesInLeaf && leafCost <= minCost || mid == L) {
-			bvh.push_back({ bound, -1, -1, L, R });
-			return nodeId;
-		}
-
-		bvh.push_back({ bound, d, 0, L, R });
-		// 将BVH节点排成序列，非叶子节点的左儿子在其相邻右边，只记录右儿子编号
-		int nowId = nodeId;
-		int lc = BuildBVH(L, mid, depth + 1);
-		bvh[nowId].rightChild = BuildBVH(mid, R, depth + 1);
-		return nowId;
-	}
-
-	int maxTrianglesInLeaf = 255;
-	float trav = 1.f;
-public:
-	std::vector<Vertex> vertices;
-	std::vector<Triangle> triangles;
-	std::vector<BVHNode> bvh;
-};
 
 void PrefixSum() {
 	ComputeShader cs("./shaders/prefix_sum.comp");
@@ -385,52 +212,48 @@ glm::vec3 Li(const Ray& reye, const BVH& bvhaccel) {
 }
 
 int main() {
-	GLFWInit();
-	glm::vec3 cameraPosition(0, 2.8, 9);
+	WindowInit();
+	ImGuiLayer* gui = new ImGuiLayer(window);
+	glm::vec3 cameraPosition(0, 2.8, 7);
 	glm::vec3 cameraCenter(0, 2.8, 0);
 	glm::vec3 cameraUp(0, 1, 0);
 	Camera camera(cameraPosition, cameraCenter, cameraUp, 45.0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-	// 存储一个默认材质
-	materials.push_back(Material{});
+	// Cornell Box
 	Material m;
 	m.baseColor = glm::vec3(0.65, 0.05, 0.05);
-	materials.push_back(m);
+	Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0, 0, -2)) * 
+		glm::scale(glm::mat4(1), glm::vec3(8)), m, "bunny");
+	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -0.5)), m, "marry");
 	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
-	materials.push_back(m);
-	m.baseColor = glm::vec3(0.12, 0.45, 0.15);
-	materials.push_back(m);
-	m.baseColor = glm::vec3(0.1);
-	m.emssive = glm::vec3(1);
-	materials.push_back(m);
-
-	// Cornell Box
-	//Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0.6, 1.85, 3.7)), 0);
-	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -0.5)), 0);
 	Model f1("./model/floor/floor.obj", 
-		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "floor");
 	Model f2("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(0, 2.75, -2.75)) *
 		glm::rotate(glm::mat4(1), glm::radians(90.f), glm::vec3(1.0, 0.0, 0.0)) *
-		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "front_wall");
+	m.baseColor = glm::vec3(0.12, 0.45, 0.15);
 	Model f3("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(2.75, 2.75, 0)) *
 		glm::rotate(glm::mat4(1), glm::radians(90.f), glm::vec3(0.0, 0.0, 1.0)) *
-		glm::scale(glm::mat4(1), glm::vec3(0.1)), 3);
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "right_wall");
+	m.baseColor = glm::vec3(0.65, 0.05, 0.05);
 	Model f4("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(-2.75, 2.75, 0.0)) *
 		glm::rotate(glm::mat4(1), glm::radians(-90.f), glm::vec3(0.0, 0.0, 1.0)) *
-		glm::scale(glm::mat4(1), glm::vec3(0.1)), 1);
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "left_wall");
+	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
 	Model f5("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(0, 5.55, 0)) *
 		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
-		glm::scale(glm::mat4(1), glm::vec3(0.1)), 2);
+		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "ceiling");
+	m.emssive = glm::vec3(3);
 	Model light("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(0, 5.54, 0)) *
 		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
-		glm::scale(glm::mat4(1), glm::vec3(0.02)), 4);
+		glm::scale(glm::mat4(1), glm::vec3(0.02)), m, "ceiling_light");
 	std::vector<Model> models;
-	models.push_back(m1);
+	models.push_back(m0);
 	models.push_back(f1);
 	models.push_back(f2);
 	models.push_back(f3);
@@ -440,6 +263,8 @@ int main() {
 
 	ModelOutput(models); 
 	std::cout << "Load " << vertices.size() << " vertices and " << triangles.size() << " triangles" << std::endl;
+
+	gui->updateModel(models);
 
 	// 构建bvh，获取bvh结构以及重排后的顶点和三角形数据
 	auto c1 = clock();
@@ -477,6 +302,8 @@ int main() {
 		unsigned int tbo[5], tex[5];
 		glGenBuffers(5, tbo);
 		glGenTextures(5, tex);
+
+		gui->materialTex = tex[1];
 	
 		std::vector<float> vertexBuffer; // 顶点
 		vertexBuffer.resize(VERTEX_SIZE * bvhaccel->vertices.size());
@@ -527,11 +354,13 @@ int main() {
 			materialBuffer[num++] = material.IOR;
 			materialBuffer[num++] = material.transmission;
 		}
-		glBindBuffer(GL_TEXTURE_BUFFER, tbo[1]);
-		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * MATERIAL_SIZE * materials.size(), &materialBuffer[0], GL_STATIC_DRAW);
+		/*glBindBuffer(GL_TEXTURE_BUFFER, tbo[1]);
+		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * MATERIAL_SIZE * materials.size(), &materialBuffer[0], GL_STATIC_DRAW);*/
 		glActiveTexture(GL_TEXTURE0 + 1);
-		glBindTexture(GL_TEXTURE_BUFFER, tex[1]); 
-		glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[1]); 
+		glBindTexture(GL_TEXTURE_1D, tex[1]); 
+		//glTexBuffer(GL_TEXTURE_1D, GL_RGB32F, tbo[1]);
+		glTexImage1D(GL_TEXTURE_1D, 0, GL_RGB32F, sizeof(float) * MATERIAL_SIZE * materials.size(), 0, GL_RGB, GL_FLOAT, &materialBuffer[0]);
+		glGenerateMipmap(GL_TEXTURE_1D);
 		std::cout << "materialBuffer width: " << MATERIAL_SIZE * materials.size() / 3 << "\n";
 
 		std::vector<float> triangleBuffer; // 三角形
@@ -638,6 +467,10 @@ int main() {
 		float lastTime = glfwGetTime(), deltaTime;
 		unsigned int frameCount = 1;
 		while (!glfwWindowShouldClose(window)) {
+			glClear(GL_COLOR_BUFFER_BIT);
+
+			gui->FrameBegin();
+
 			float currentTime = glfwGetTime();
 			deltaTime = currentTime - lastTime;
 			lastTime = currentTime;
@@ -648,6 +481,16 @@ int main() {
 			glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
 			cs.use();
+
+			ImGui::Begin("Settings");
+			if (gui->showModelSettingCombo()) {
+				cs.setInt("redraw", 1);
+				frameCount = 0;
+			} else {
+				cs.setInt("redraw", 0);
+			}
+			ImGui::End();
+
 			cs.setVec3f("camera.eye", camera.eye.x, camera.eye.y, camera.eye.z);
 			cs.setVec3f("camera.lowerLeftCorner", camera.lowerLeftCorner.x, 
 				camera.lowerLeftCorner.y, camera.lowerLeftCorner.z);
@@ -659,10 +502,13 @@ int main() {
 
 			glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
+
 			render.use();
 			glActiveTexture(GL_TEXTURE0 + 0);
 			glBindTexture(GL_TEXTURE_2D, outputImage);
 			renderQuad();
+
+			gui->FrameEnd();
 
 			glfwSwapBuffers(window);
 			glfwPollEvents();

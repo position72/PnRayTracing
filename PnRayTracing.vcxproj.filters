@@ -21,6 +21,27 @@
     <ClCompile Include="include\glad.c">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="include\Imgui\imgui.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="include\Imgui\imgui_demo.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="include\Imgui\imgui_draw.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="include\Imgui\imgui_impl_glfw.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="include\Imgui\imgui_impl_opengl3.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="include\Imgui\imgui_tables.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="include\Imgui\imgui_widgets.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\bound.hpp">
@@ -51,6 +72,39 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="include\BSDF.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imconfig.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imgui.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imgui_impl_glfw.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imgui_impl_opengl3.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imgui_impl_opengl3_loader.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imgui_internal.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imstb_rectpack.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imstb_textedit.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Imgui\imstb_truetype.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ImGuiLayer.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\BVH.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

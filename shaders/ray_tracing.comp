@@ -82,7 +82,7 @@ struct Camera{
 layout(binding = 0, rgba32f) uniform image2D output_image;
 
 layout(binding = 0) uniform samplerBuffer vertices;
-layout(binding = 1) uniform samplerBuffer materials;
+layout(binding = 1) uniform sampler1D materials;
 layout(binding = 2) uniform samplerBuffer triangles;
 layout(binding = 3) uniform samplerBuffer bvh_nodes;
 layout(binding = 4) uniform samplerBuffer lights;
@@ -90,6 +90,8 @@ uniform int lightsSize; // lights元素个数
 uniform float lightsSumArea; // lights表面积总和
 
 uniform sampler2D textures[20]; // 物体纹理
+
+ivec2 imagePos;
 
 Vertex GetVertex(int i) {
 	int offset = i * VERTEX_VEC3_COUNT;
@@ -114,21 +116,21 @@ vec3 GetVertexNormal(int i) {
 Material GetMaterial(int i) {
 	int offset = i * MATERIAL_VEC3_COUNT;
 	Material material;
-	material.emssive   = texelFetch(materials, offset + 0).rgb;
-	material.baseColor = texelFetch(materials, offset + 1).rgb;
-	vec3 param1		   = texelFetch(materials, offset + 2).rgb;
+	material.emssive   = texelFetch(materials, offset + 0, 0).rgb;
+	material.baseColor = texelFetch(materials, offset + 1, 0).rgb;
+	vec3 param1		   = texelFetch(materials, offset + 2, 0).rgb;
 	material.subsurface = param1[0];
 	material.metallic = param1[1];
 	material.specular = param1[2];
-	vec3 param2        = texelFetch(materials, offset + 3).rgb;
+	vec3 param2        = texelFetch(materials, offset + 3, 0).rgb;
 	material.specularTint = param2[0];
 	material.roughness = param2[1];
 	material.anisotropic = param2[2];
-	vec3 param3        = texelFetch(materials, offset + 4).rgb;
+	vec3 param3        = texelFetch(materials, offset + 4, 0).rgb;
 	material.sheen = param3[0];
 	material.sheenTint = param3[1];
 	material.clearcoat = param3[2];
-	vec3 param4        = texelFetch(materials, offset + 5).rgb;
+	vec3 param4        = texelFetch(materials, offset + 5, 0).rgb;
 	material.clearcoatGloss = param3[0];
 	material.IOR = param3[1];
 	material.transmission = param3[2];
@@ -523,11 +525,12 @@ Interaction TriangleSample(in Triangle tri, in vec2 u) {
 	return res;
 }
 
-vec3 DiffuseBRDF(in vec3 n, in vec3 wo, in Material m, out vec3 wi, out float pdf) {
-    vec3 t; // 切线
+
+vec3 DiffuseBRDF(in vec3 n, in vec3 wo, in Material m, out vec3 wi, out float pdf, out vec3 t, out vec3 b) {
+    // 切线
     if (n.z > 0.9999995f) t = vec3(1.f, 0.f, 0.f);
     else t = normalize(cross(n, wo));
-    vec3 b = cross(n, t); // 次切线
+    b = cross(n, t); // 次切线
     vec3 wi_t = UniformSampleHemisphere(vec2(Rand0To1(), Rand0To1()));
     pdf = InvPI;
     // 从切线空间转为世界空间
@@ -537,7 +540,122 @@ vec3 DiffuseBRDF(in vec3 n, in vec3 wo, in Material m, out vec3 wi, out float pd
     return m.baseColor * InvPI;
 }
 
-ivec2 imagePos;
+vec3 UniformSampledWi(in vec3 n, in vec3 wo, out float pdf, out vec3 t, out vec3 b) {
+    // 切线
+    if (n.z > 0.9999995f) t = vec3(1.0, 0.0, 0.0);
+    else t = normalize(cross(n, wo));
+    b = cross(n, t); // 次切线
+    vec3 wi_t = UniformSampleHemisphere(vec2(Rand0To1(), Rand0To1()));
+    pdf = InvPI;
+    // 从切线空间转为世界空间
+    return vec3(t[0] * wi_t[0] + t[1] * wi_t[1] + t[2] * wi_t[2],
+                b[0] * wi_t[0] + b[1] * wi_t[1] + b[2] * wi_t[2],
+                n[0] * wi_t[0] + n[1] * wi_t[1] + n[2] * wi_t[2]);
+}
+
+
+float sqr(float x) { return x*x; }
+
+float SchlickFresnel(float u) {
+    float m = clamp(1-u, 0, 1);
+    float m2 = m*m;
+    return m2*m2*m; // pow(m,5)
+}
+
+float GTR1(float NdotH, float a) {
+    if (a >= 1) return 1/PI;
+    float a2 = a*a;
+    float t = 1 + (a2-1)*NdotH*NdotH;
+    return (a2-1) / (PI*log(a2)*t);
+}
+
+float GTR2(float NdotH, float a) {
+    float a2 = a*a;
+    float t = 1 + (a2-1)*NdotH*NdotH;
+    return a2 / (PI * t*t);
+}
+
+float GTR2_aniso(float NdotH, float HdotX, float HdotY, float ax, float ay) {
+    return 1 / (PI * ax*ay * sqr( sqr(HdotX/ax) + sqr(HdotY/ay) + NdotH*NdotH ));
+}
+
+float smithG_GGX(float NdotV, float alphaG) {
+    float a = alphaG*alphaG;
+    float b = NdotV*NdotV;
+    return 1 / (NdotV + sqrt(a + b - a*b));
+}
+
+float smithG_GGX_aniso(float NdotV, float VdotX, float VdotY, float ax, float ay) {
+    return 1 / (NdotV + sqrt( sqr(VdotX*ax) + sqr(VdotY*ay) + sqr(NdotV) ));
+}
+
+vec3 mon2lin(vec3 x) {
+    return vec3(pow(x[0], 2.2), pow(x[1], 2.2), pow(x[2], 2.2));
+}
+
+
+vec3 DisneyPrincipledBRDF(vec3 V, vec3 N, vec3 L, vec3 X, vec3 Y, Material material) {
+	float NdotL = dot(N, L);
+    float NdotV = dot(N, V);
+    if(NdotL < 0 || NdotV < 0) return vec3(0);
+
+    vec3 H = normalize(L + V);
+    float NdotH = dot(N, H);
+    float LdotH = dot(L, H);
+
+    // 各种颜色
+    vec3 Cdlin = material.baseColor;
+    float Cdlum = 0.3 * Cdlin.r + 0.6 * Cdlin.g  + 0.1 * Cdlin.b;
+    vec3 Ctint = (Cdlum > 0) ? (Cdlin/Cdlum) : (vec3(1));   
+    vec3 Cspec = material.specular * mix(vec3(1), Ctint, material.specularTint);
+    vec3 Cspec0 = mix(0.08*Cspec, Cdlin, material.metallic); // 0° 镜面反射颜色
+    vec3 Csheen = mix(vec3(1), Ctint, material.sheenTint);   // 织物颜色
+
+    // 漫反射
+    float Fd90 = 0.5 + 2.0 * LdotH * LdotH * material.roughness;
+    float FL = SchlickFresnel(NdotL);
+    float FV = SchlickFresnel(NdotV);
+    float Fd = mix(1.0, Fd90, FL) * mix(1.0, Fd90, FV);
+
+    // 次表面散射
+    float Fss90 = LdotH * LdotH * material.roughness;
+    float Fss = mix(1.0, Fss90, FL) * mix(1.0, Fss90, FV);
+    float ss = 1.25 * (Fss * (1.0 / (NdotL + NdotV) - 0.5) + 0.5);
+
+     
+    // 镜面反射 -- 各向同性
+    float alpha = material.roughness * material.roughness;
+    float Ds = GTR2(NdotH, alpha);
+    float FH = SchlickFresnel(LdotH);
+    vec3 Fs = mix(Cspec0, vec3(1), FH);
+    float Gs = smithG_GGX(NdotL, material.roughness);
+    Gs *= smithG_GGX(NdotV, material.roughness);
+    
+    // 镜面反射 -- 各向异性
+    /*float aspect = sqrt(1.0 - material.anisotropic * 0.9);
+    float ax = max(0.001, sqr(material.roughness)/aspect);
+    float ay = max(0.001, sqr(material.roughness)*aspect);
+    float Ds = GTR2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
+    float FH = SchlickFresnel(LdotH);
+    vec3 Fs = mix(Cspec0, vec3(1), FH);
+    float Gs;
+    Gs  = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay);
+    Gs *= smithG_GGX_aniso(NdotV, dot(V, X), dot(V, Y), ax, ay);*/
+
+    // 清漆
+    float Dr = GTR1(NdotH, mix(0.1, 0.001, material.clearcoatGloss));
+    float Fr = mix(0.04, 1.0, FH);
+    float Gr = smithG_GGX(NdotL, 0.25) * smithG_GGX(NdotV, 0.25);
+
+    // sheen
+    vec3 Fsheen = FH * material.sheen * Csheen;
+    
+    vec3 diffuse = (1.0/PI) * mix(Fd, ss, material.subsurface) * Cdlin + Fsheen;
+    vec3 specular = Gs * Fs * Ds;
+    vec3 clearcoat = vec3(0.25 * Gr * Fr * Dr * material.clearcoat);
+
+    return diffuse * (1.0 - material.metallic) + specular + clearcoat;
+}
 
 struct BounceLi {
 	vec3 Li;
@@ -547,40 +665,30 @@ struct BounceLi {
 	float pR;
 };
 
-#define MAX_BOUNCE_DEPTH 3
-BounceLi res[MAX_BOUNCE_DEPTH];
+#define MAX_BOUNCE_DEPTH 4
 
 vec3 Li(in Ray reye) {
 	Ray ray = reye;
 	Interaction isect;
 	// res[i]: 光线第i次弹射时，采样得到的直接光照，所在交点的BRDF，
 	// 采样得到下一次光线方向wi与法线夹角的cos值和pdf，俄罗斯轮盘赌的概率pR
-	
-	for (int i = 0; i < MAX_BOUNCE_DEPTH; ++i) { // 清空数组
-		res[i].Li = vec3(0.0);
-		res[i].f = vec3(0.0);
-		res[i].cosTheta = 0.0;
-		res[i].pdf = 0.0;
-		res[i].pR = 0.0;
-	}
-	int finalBounce = MAX_BOUNCE_DEPTH - 1;
-	for(int bounce = 0; bounce < MAX_BOUNCE_DEPTH; ++bounce) {
+	vec3 Lo = vec3(0.0);
+	vec3 c = vec3(1.0); // 第i次弹射光照的累计权重
+	for (int bounce = 0; bounce < MAX_BOUNCE_DEPTH; ++bounce) {
 		if (!BVHIntersect(ray, isect)) {
-			res[bounce].Li = vec3(0.0);
-			finalBounce = bounce;
-			break;
+			return Lo;
 		}
 		const vec3 p = isect.position;
 		const vec3 n = isect.normal;
-		const vec3 wo = -ray.dir;
+		const vec3 wo = normalize(-ray.dir);
 		Material material = GetMaterial(isect.materialId);
 		if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
 			material.baseColor = texture(textures[isect.textureId], isect.texcoord).rgb;
 		}
-		vec3 wi;
+
+		vec3 wi, t, b;
 		float pdf;
-		// BRDF项，返回函数值，采样方向和概率
-		vec3 f = DiffuseBRDF(n, wo, material, wi, pdf); 
+
 		// 自发光
 		vec3 LDirect = material.emssive;
 		// 其他灯光的直接光照
@@ -596,35 +704,28 @@ vec3 Li(in Ray reye) {
 			r.origin = p + n * 0.0001; // 防止自相交
 			if (!BVHIntersectP(r)) {
 				// pdf为所有灯光表面积的倒数
-				float lPdf = 1.f / lightsSumArea;
+				float l_Pdf = 1.f / lightsSumArea;
 				float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
 				vec3 li = GetMaterial(triangleIsect.materialId).emssive;
-				LDirect += f * li * abs(dot(n, r.dir) * dot(triangleIsect.normal, r.dir)) / (lPdf * dis2);
+				// 针对灯光方向计算的brdf
+				vec3 l_brdf = DisneyPrincipledBRDF(wo, n, normalize(r.dir), t, b, material);
+				LDirect += l_brdf * li * abs(dot(n, r.dir) * dot(triangleIsect.normal, r.dir)) / (l_Pdf * dis2);
 			}
 		}
-		// 俄罗斯轮盘赌决定是否计算间接光
-		float pR = 0.85;
-		res[bounce].Li = LDirect;
-		res[bounce].f = f;
-		res[bounce].cosTheta = abs(dot(n, wi));
-		res[bounce].pdf = pdf;
-		res[bounce].pR = pR;
-		float rR = Rand0To1();
-		int tmp = int(1.0 - step(pR, rR));
-		finalBounce = (1 - tmp) * bounce + tmp * finalBounce; 
+		Lo += c * LDirect;
+		// 随机采样wi得到的brdf
+		wi = UniformSampledWi(n, wo, pdf, t, b);
+		c *= DisneyPrincipledBRDF(wo, n, wi, t, b, material) * abs(dot(n, wi)) / pdf;
+
 		ray.origin = p + n * 0.0001f;
 		ray.dir = wi;
 		ray.tMax = FLOAT_MAX;
 	}
-	
-	debug_data[imagePos.x] = finalBounce;
-	for (int i = finalBounce - 1; i >= 0; --i) {
-		// 当前弹射所接受的光照等于直接光照加间接光照，下一次弹射的直接光照作为当前的间接光照
-		res[i].Li += res[i].f * res[i + 1].Li * res[i].cosTheta / (res[i].pdf * (1.0 - res[i].pR));
-	}
-	return res[0].Li;
+	return Lo;
 }
 
+
+uniform int redraw;
 void main() {
 	imagePos = ivec2(gl_GlobalInvocationID.xy);
 	seed = uint(uint(imagePos.x) * uint(1973) + 
@@ -634,6 +735,7 @@ void main() {
 	vec3 color = Li(ray);
 	color = clamp(color, vec3(0), vec3(1));
 	// 多帧混合
-	vec3 preColor = imageLoad(output_image, imagePos).rgb;
+	// 如果材质发生改变，则抛弃之前的绘制
+	vec3 preColor = redraw == 1 ? vec3(0.0) : imageLoad(output_image, imagePos).rgb;
 	imageStore(output_image, imagePos, vec4(mix(preColor, color, 1.0 / float(frameCount + 1)), 1.0));
 }
