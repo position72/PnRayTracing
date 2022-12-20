@@ -52,7 +52,7 @@ public:
 		glActiveTexture(GL_TEXTURE0 + 1);
 		glBindTexture(GL_TEXTURE_1D, materialTex);
 		int offset = MATERIAL_SIZE * currentMaterialId / 3; // 第几个像素，一组RGB组成一个像素
-		if (materials[currentMaterialId].light) {
+		if (materials[currentMaterialId].emssive != glm::vec3(0)) {
 			change |= ImGui::ColorEdit3("emssive", glm::value_ptr(materials[currentMaterialId].emssive));
 		} else {
 			change |= ImGui::ColorEdit3("basecolor", glm::value_ptr(materials[currentMaterialId].baseColor));
@@ -71,7 +71,7 @@ public:
 		change |= ImGui::SliderFloat("transmission", &materials[currentMaterialId].transmission, 0.0, 1.0);
 		
 		if (change) {
-			if (materials[currentMaterialId].light) {
+			if (materials[currentMaterialId].emssive != glm::vec3(0)) {
 				glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 0, 3 * sizeof(float), GL_RGB, GL_FLOAT, glm::value_ptr(materials[currentMaterialId].emssive));
 			} else {
 				glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 1, 3 * sizeof(float), GL_RGB, GL_FLOAT, glm::value_ptr(materials[currentMaterialId].baseColor));

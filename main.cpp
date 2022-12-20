@@ -56,9 +56,10 @@ bool mouseButtonRightPress = false;
 bool mouseFirstMove = false;
 double lastX, lastY;
 glm::vec3 cameraPosition(0, 2.8, 7);
-glm::vec3 cameraCenter(0, 2.8, 0);
+glm::vec3 cameraCenter(0, 0, 0);
 glm::vec3 cameraUp(0, 1, 0);
-Camera camera(cameraPosition, cameraCenter, cameraUp, 45.0, (float)SCREEN_WIDTH / SCREEN_HEIGHT);
+float fov = 45.f;
+Camera camera;
 void WindowInit() {
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -123,10 +124,10 @@ void Cursorposfun(GLFWwindow* window, double xpos, double ypos) {
 		double deltaX = xpos - lastX;
 		double deltaY = ypos - lastY;
 		if (mouseButtonLeftPress) {
-			//camera.UpdateRotate(deltaX, deltaY);
+			camera.UpdateRotate(deltaX, deltaY);
 		}
 		if (mouseButtonRightPress) {
-			//camera.UpdateTranslate(deltaX);
+			camera.UpdateTranslate(deltaX);
 		}
 
 		lastX = xpos;
@@ -187,22 +188,21 @@ void renderQuad() {
 	glBindVertexArray(0);
 }
 
-int main() {
-	WindowInit();
 
-	glfwSetMouseButtonCallback(window, MouseButtonCallback);
-	glfwSetCursorPosCallback(window, Cursorposfun);
-
-	std::unique_ptr<ImGuiLayer> gui(new ImGuiLayer(window));
+void CornellBox() {
+	glm::vec3 cameraEye(0, 2.8, 7);
+	glm::vec3 cameraCenter(0, 2.8, 0);
+	glm::vec3 cameraUp(0, 1, 0);
+	camera.UpdateCamera(cameraEye, cameraCenter, cameraUp, 45.f, (float)SCREEN_WIDTH / SCREEN_HEIGHT);
 
 	// Cornell Box
 	Material m;
-	m.baseColor = glm::vec3(0.65, 0.05, 0.05);
-	Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0, 0, -2)) * 
+	m.baseColor = glm::vec3(0.65, 0.65, 0.65);
+	Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0, 0, -2)) *
 		glm::scale(glm::mat4(1), glm::vec3(8)), m, "bunny");
 	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -0.5)), m, "marry");
 	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
-	Model f1("./model/floor/floor.obj", 
+	Model f1("./model/floor/floor.obj",
 		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "floor");
 	Model f2("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(0, 2.75, -2.75)) *
@@ -224,12 +224,11 @@ int main() {
 		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
 		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "ceiling");
 	m.emssive = glm::vec3(3);
-	m.light = true;
 	Model light("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(0, 5.54, 0)) *
 		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
 		glm::scale(glm::mat4(1), glm::vec3(0.02)), m, "ceiling_light");
-	std::vector<Model> models;
+	
 	models.push_back(m0);
 	models.push_back(f1);
 	models.push_back(f2);
@@ -238,9 +237,38 @@ int main() {
 	models.push_back(f5);
 	models.push_back(light);
 
-	ModelOutput(models); 
+}
+
+void SceneFlat() {
+	glm::vec3 cameraEye(0, 2.8, 7);
+	glm::vec3 cameraCenter(0, 0, 0);
+	glm::vec3 cameraUp(0, 1, 0);
+	camera.UpdateCamera(cameraEye, cameraCenter, cameraUp, 45.f, (float)SCREEN_WIDTH / SCREEN_HEIGHT);
+	Material m;
+	m.baseColor = glm::vec3(0.65, 0.65, 0.65);
+	Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)) *
+		glm::scale(glm::mat4(1), glm::vec3(10)), m, "bunny");
+	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
+	Model floor("./model/floor/floor.obj",
+		glm::scale(glm::mat4(1), glm::vec3(1)), m, "floor");
+	models.push_back(m0);
+	models.push_back(floor);
+}
+
+int main() {
+	WindowInit();
+
+	glfwSetMouseButtonCallback(window, MouseButtonCallback);
+	glfwSetCursorPosCallback(window, Cursorposfun);
+
+	// 在这里更换场景
+	CornellBox();
+	//SceneFlat();
+	// 将模型数据输出到顶点和三角形数组
+	ModelOutput(models);
 	std::cout << "Load " << vertices.size() << " vertices and " << triangles.size() << " triangles" << std::endl;
 
+	std::unique_ptr<ImGuiLayer> gui(new ImGuiLayer(window));
 	gui->updateModel(models);
 
 	// 构建bvh，获取bvh结构以及重排后的顶点和三角形数据
@@ -252,7 +280,7 @@ int main() {
 	// 在重排后的三角形中寻找能自发光的三角形索引，加入到lights
 	for (int i = 0; i < bvhaccel->triangles.size(); ++i) {
 		const Triangle& tri = bvhaccel->triangles[i];
-		if (materials[tri.materialId].light) {
+		if (materials[tri.materialId].emssive != glm::vec3(0)) {
 			lights.push_back({ i, tri.area });
 			if (lights.size() > 1) {
 				lights[lights.size() - 1].prefixArea += lights[lights.size() - 2].prefixArea;
@@ -268,9 +296,14 @@ int main() {
 	cs.setInt("SCREEN_WIDTH", SCREEN_WIDTH);
 	cs.setInt("SCREEN_HEIGHT", SCREEN_HEIGHT);
 	cs.setInt("lightsSize", lights.size());
-	cs.setFloat("lightsSumArea", lights[lights.size() - 1].prefixArea);
+	cs.setFloat("lightsSumArea", lights.empty() ? 0 : lights[lights.size() - 1].prefixArea);
 
 	c1 = clock();
+
+	// 加载HDR
+	//LoadHDRImage("./HDR/clarens_midday_2k.hdr");
+	LoadHDRImage("./HDR/photo_studio_loft_hall_2k.hdr");
+
 	// 将数据存放到缓冲纹理中并传输到着色器中
 
 	// 创建缓冲区对象和纹理对象
@@ -380,20 +413,22 @@ int main() {
 	glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[3]);
 	std::cout << "bvhnodeBuffer width: " << BVHNODE_SIZE * bvhaccel->bvh.size() / 3 << "\n";
 
-	std::vector<float> lightBuffer; // 灯光
-	lightBuffer.resize(LIGHT_SIZE * lights.size());
-	num = 0;
-	for (const auto& l : lights) {
-		lightBuffer[num++] = (float)l.index;
-		lightBuffer[num++] = l.prefixArea;
-		lightBuffer[num++] = 0.f;
+	if (lights.size()) {
+		std::vector<float> lightBuffer; // 灯光
+		lightBuffer.resize(LIGHT_SIZE * lights.size());
+		num = 0;
+		for (const auto& l : lights) {
+			lightBuffer[num++] = (float)l.index;
+			lightBuffer[num++] = l.prefixArea;
+			lightBuffer[num++] = 0.f;
+		}
+		glBindBuffer(GL_TEXTURE_BUFFER, tbo[4]);
+		glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * LIGHT_SIZE * lights.size(), &lightBuffer[0], GL_STATIC_DRAW);
+		glActiveTexture(GL_TEXTURE0 + 4);
+		glBindTexture(GL_TEXTURE_BUFFER, tex[4]);
+		glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[4]);
+		std::cout << "lightBuffer width: " << LIGHT_SIZE * lights.size() / 3 << "\n";
 	}
-	glBindBuffer(GL_TEXTURE_BUFFER, tbo[4]);
-	glBufferData(GL_TEXTURE_BUFFER, sizeof(float) * LIGHT_SIZE * lights.size(), &lightBuffer[0], GL_STATIC_DRAW);
-	glActiveTexture(GL_TEXTURE0 + 4);
-	glBindTexture(GL_TEXTURE_BUFFER, tex[4]);
-	glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo[4]);
-	std::cout << "lightBuffer width: " << LIGHT_SIZE * lights.size() / 3 << "\n";
 
 	// 生成并载入物体的纹理
 	for (int i = 0; i < textureInfos.size(); ++i) {

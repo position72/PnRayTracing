@@ -2,6 +2,7 @@
 #include "PnRT.hpp"
 
 struct Camera {
+	Camera() {}
 	Camera(const glm::vec3& eye, const glm::vec3& center, const glm::vec3& up, 
 		float fov, float aspect) {
 		UpdateCamera(eye, center, up, fov, aspect);
@@ -30,6 +31,8 @@ struct Camera {
 	}
 
 	void UpdateRotate(float phi, float theta) {
+		phi *= 0.6;
+		theta *= 0.6;
 		phi = glm::radians(phi);
 		theta = glm::radians(theta);
 		glm::vec3 nv = glm::vec3(std::cos(phi) * std::cos(theta), std::sin(phi) * std::cos(theta), std::sin(theta));

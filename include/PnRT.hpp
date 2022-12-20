@@ -37,8 +37,8 @@ constexpr float FLOAT_MAX = std::numeric_limits<float>::max();
 constexpr float PI = 3.14159265358979323846;
 constexpr float InvPI = 0.31830988618379067154;
 constexpr float ShadowEpsilon = 0.0001f;
-constexpr int SCREEN_WIDTH = 512;
-constexpr int SCREEN_HEIGHT = 512;
+constexpr int SCREEN_WIDTH = 800;
+constexpr int SCREEN_HEIGHT = 600;
 
 // count of float
 constexpr int VERTEX_SIZE = 15;
@@ -77,7 +77,6 @@ struct Material {
 	float clearcoatGloss = 0.0;
 	float IOR = 1.0;
 	float transmission = 0.0;
-	bool light = false;
 };
 
 struct Interaction {
@@ -115,6 +114,7 @@ std::vector<unsigned char*> textures;
 std::map<std::string, int> texturePathToId;
 std::vector<TextureInfo> textureInfos;
 std::vector<Light> lights;
+std::vector<Model> models;
 
 
 inline glm::vec3 TextureGetColor255(int i, float u, float v) {
@@ -149,4 +149,26 @@ inline float Clamp(float x, float L, float R) {
 	if (x >= R) return R;
 	if (x <= L) return L;
 	return x;
+}
+
+inline void LoadHDRImage(const char* path) { // 必须在某个着色器使用后调用
+	int width, height, nComps;
+	unsigned int hdrTexture;
+	float* hdrData = stbi_loadf(path, &width, &height, &nComps, 0);
+	if (!hdrData) {
+		std::cout << "Failed to load HDR image: " << path << std::endl;
+	} else {		
+		glGenTextures(1, &hdrTexture);
+		glActiveTexture(GL_TEXTURE30);
+		glBindTexture(GL_TEXTURE_2D, hdrTexture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, hdrData);
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+		std::cout << "Success to load HDR Image: " << path << std::endl;
+		stbi_image_free(hdrData);
+	}
 }
