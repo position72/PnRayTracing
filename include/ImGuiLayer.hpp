@@ -52,12 +52,16 @@ public:
 		glActiveTexture(GL_TEXTURE0 + 1);
 		glBindTexture(GL_TEXTURE_1D, materialTex);
 		int offset = MATERIAL_SIZE * currentMaterialId / 3; // 第几个像素，一组RGB组成一个像素
-		change |= ImGui::ColorEdit3("basecolor", glm::value_ptr(materials[currentMaterialId].baseColor));
+		if (materials[currentMaterialId].light) {
+			change |= ImGui::ColorEdit3("emssive", glm::value_ptr(materials[currentMaterialId].emssive));
+		} else {
+			change |= ImGui::ColorEdit3("basecolor", glm::value_ptr(materials[currentMaterialId].baseColor));
+		}
 		change |= ImGui::SliderFloat("subsurface", &materials[currentMaterialId].subsurface, 0.0, 1.0);
 		change |= ImGui::SliderFloat("metallic", &materials[currentMaterialId].metallic, 0.0, 1.0);
 		change |= ImGui::SliderFloat("specular", &materials[currentMaterialId].specular, 0.0, 1.0);
 		change |= ImGui::SliderFloat("specularTint", &materials[currentMaterialId].specularTint, 0.0, 1.0);
-		change |= ImGui::SliderFloat("roughness", &materials[currentMaterialId].roughness, 0.0, 1.0);
+		change |= ImGui::SliderFloat("roughness", &materials[currentMaterialId].roughness, 0.001, 1.0);
 		change |= ImGui::SliderFloat("anisotropic", &materials[currentMaterialId].anisotropic, 0.0, 1.0);
 		change |= ImGui::SliderFloat("sheen", &materials[currentMaterialId].sheen, 0.0, 1.0);
 		change |= ImGui::SliderFloat("sheenTint", &materials[currentMaterialId].sheenTint, 0.0, 1.0);
@@ -67,7 +71,11 @@ public:
 		change |= ImGui::SliderFloat("transmission", &materials[currentMaterialId].transmission, 0.0, 1.0);
 		
 		if (change) {
-			glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 1, 3 * sizeof(float), GL_RGB, GL_FLOAT, glm::value_ptr(materials[currentMaterialId].baseColor));
+			if (materials[currentMaterialId].light) {
+				glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 0, 3 * sizeof(float), GL_RGB, GL_FLOAT, glm::value_ptr(materials[currentMaterialId].emssive));
+			} else {
+				glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 1, 3 * sizeof(float), GL_RGB, GL_FLOAT, glm::value_ptr(materials[currentMaterialId].baseColor));
+			}
 			glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 2, 3 * sizeof(float), GL_RGB, GL_FLOAT, &materials[currentMaterialId].subsurface);
 			glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 3, 3 * sizeof(float), GL_RGB, GL_FLOAT, &materials[currentMaterialId].specularTint);
 			glTexSubImage1D(GL_TEXTURE_1D, 0, offset + 4, 3 * sizeof(float), GL_RGB, GL_FLOAT, &materials[currentMaterialId].sheen);

@@ -69,7 +69,7 @@ struct Material {
 	float metallic = 0.0;
 	float specular = 0.0;
 	float specularTint = 0.0;
-	float roughness = 0.0;
+	float roughness = 0.9;
 	float anisotropic = 0.0;
 	float sheen = 0.0;
 	float sheenTint = 0.0;
@@ -77,6 +77,7 @@ struct Material {
 	float clearcoatGloss = 0.0;
 	float IOR = 1.0;
 	float transmission = 0.0;
+	bool light = false;
 };
 
 struct Interaction {
@@ -114,6 +115,7 @@ std::vector<unsigned char*> textures;
 std::map<std::string, int> texturePathToId;
 std::vector<TextureInfo> textureInfos;
 std::vector<Light> lights;
+
 
 inline glm::vec3 TextureGetColor255(int i, float u, float v) {
 	const TextureInfo& info = textureInfos[i];

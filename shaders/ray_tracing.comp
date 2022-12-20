@@ -92,6 +92,7 @@ uniform float lightsSumArea; // lights表面积总和
 uniform sampler2D textures[20]; // 物体纹理
 
 ivec2 imagePos;
+int bounce;
 
 Vertex GetVertex(int i) {
 	int offset = i * VERTEX_VEC3_COUNT;
@@ -525,36 +526,29 @@ Interaction TriangleSample(in Triangle tri, in vec2 u) {
 	return res;
 }
 
-
-vec3 DiffuseBRDF(in vec3 n, in vec3 wo, in Material m, out vec3 wi, out float pdf, out vec3 t, out vec3 b) {
-    // 切线
-    if (n.z > 0.9999995f) t = vec3(1.f, 0.f, 0.f);
-    else t = normalize(cross(n, wo));
-    b = cross(n, t); // 次切线
-    vec3 wi_t = UniformSampleHemisphere(vec2(Rand0To1(), Rand0To1()));
-    pdf = InvPI;
-    // 从切线空间转为世界空间
-    wi = vec3(t[0] * wi_t[0] + t[1] * wi_t[1] + t[2] * wi_t[2],
-              b[0] * wi_t[0] + b[1] * wi_t[1] + b[2] * wi_t[2],
-              n[0] * wi_t[0] + n[1] * wi_t[1] + n[2] * wi_t[2]);
-    return m.baseColor * InvPI;
-}
-
-vec3 UniformSampledWi(in vec3 n, in vec3 wo, out float pdf, out vec3 t, out vec3 b) {
-    // 切线
-    if (n.z > 0.9999995f) t = vec3(1.0, 0.0, 0.0);
-    else t = normalize(cross(n, wo));
-    b = cross(n, t); // 次切线
-    vec3 wi_t = UniformSampleHemisphere(vec2(Rand0To1(), Rand0To1()));
-    pdf = InvPI;
-    // 从切线空间转为世界空间
-    return vec3(t[0] * wi_t[0] + t[1] * wi_t[1] + t[2] * wi_t[2],
-                b[0] * wi_t[0] + b[1] * wi_t[1] + b[2] * wi_t[2],
-                n[0] * wi_t[0] + n[1] * wi_t[1] + n[2] * wi_t[2]);
-}
-
-
 float sqr(float x) { return x*x; }
+
+// 根据法线和出射方向建立切线空间
+void BuildTangentSpace(in vec3 n, out vec3 t, out vec3 b) {
+	// 切线
+    if (n.z > 0.9999995f) t = vec3(1.0, 0.0, 0.0);
+    else t = normalize(cross(n, vec3(0.0, 0.0, 1.0)));
+    b = cross(n, t); // 次切线
+}
+
+// 向量v从切线空间转到世界空间
+vec3 TangentToWorld(in vec3 t, in vec3 b, in vec3 n, in vec3 v) {
+	return v.x * t + v.y * b + v.z * n;
+}
+
+// 余弦加权半球采样
+vec3 SampleCosineHemisphere(in vec3 n, in vec3 t, in vec3 b, out float pdf) {
+	float theta = Rand0To1(), r = Rand0To1();
+	float x = r * sin(theta), y = r * cos(theta);
+	float z = sqrt(1 - sqr(x) - sqr(y));
+	pdf = z * InvPI;
+	return TangentToWorld(t, b, n, vec3(x, y, z));
+}
 
 float SchlickFresnel(float u) {
     float m = clamp(1-u, 0, 1);
@@ -593,6 +587,35 @@ vec3 mon2lin(vec3 x) {
     return vec3(pow(x[0], 2.2), pow(x[1], 2.2), pow(x[2], 2.2));
 }
 
+// DisneyBRDF镜面反射重要性采样
+vec3 SampleGTR2(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float alpha) {
+	float r1 = Rand0To1(), r2 = Rand0To1();
+	float phiH = 2.0 * PI * r1;
+	float cosThetaH = sqrt((1.0 - r2) / (1.0 + (alpha * alpha - 1.0) * r2));
+	float sinThetaH = max(0.0, 1.0 - sqr(cosThetaH));
+	float sinPhiH = sin(phiH), cosPhiH = 1.0 - sqr(sinPhiH);
+	vec3 h = vec3(sinThetaH * cosPhiH, sinThetaH * sinPhiH, cosThetaH);
+	h = TangentToWorld(t, b, n, h);
+	return 2 * dot(v, h) * h - v;
+}
+
+float SampleGTR2PDF(in float NdotH, in float LdotH, in float alpha) {
+	return GTR2(NdotH, alpha) * NdotH / (4.0 * LdotH);
+}
+
+// DisneyBRDF清漆重要性采样
+vec3 SampleGTR1(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float alpha, out float pdf) {
+	float r1 = Rand0To1(), r2 = Rand0To1();
+	float phiH = 2.0 * PI * r1;
+	float cosThetaH = sqrt((1.0 - pow(alpha * alpha, 1.0 - r2)) / (1.0 - alpha * alpha));
+	float sinThetaH = max(0.0, 1.0 - sqr(cosThetaH));
+	float sinPhiH = sin(phiH), cosPhiH = 1.0 - sqr(sinPhiH);
+	vec3 h = vec3(sinThetaH * cosPhiH, sinThetaH * sinPhiH, cosThetaH);
+	h = TangentToWorld(t, b, n, h);
+	vec3 l = 2 * dot(v, h) * h - v;
+	pdf = GTR1(dot(n, h), alpha) * cosPhiH / (4.0 * dot(l, h));
+	return l;
+}
 
 vec3 DisneyPrincipledBRDF(vec3 V, vec3 N, vec3 L, vec3 X, vec3 Y, Material material) {
 	float NdotL = dot(N, L);
@@ -624,15 +647,15 @@ vec3 DisneyPrincipledBRDF(vec3 V, vec3 N, vec3 L, vec3 X, vec3 Y, Material mater
 
      
     // 镜面反射 -- 各向同性
-    float alpha = material.roughness * material.roughness;
+    /*float alpha = max(0.001, material.roughness * material.roughness);
     float Ds = GTR2(NdotH, alpha);
     float FH = SchlickFresnel(LdotH);
     vec3 Fs = mix(Cspec0, vec3(1), FH);
     float Gs = smithG_GGX(NdotL, material.roughness);
-    Gs *= smithG_GGX(NdotV, material.roughness);
+    Gs *= smithG_GGX(NdotV, material.roughness);*/
     
     // 镜面反射 -- 各向异性
-    /*float aspect = sqrt(1.0 - material.anisotropic * 0.9);
+    float aspect = sqrt(1.0 - material.anisotropic * 0.9);
     float ax = max(0.001, sqr(material.roughness)/aspect);
     float ay = max(0.001, sqr(material.roughness)*aspect);
     float Ds = GTR2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
@@ -640,7 +663,7 @@ vec3 DisneyPrincipledBRDF(vec3 V, vec3 N, vec3 L, vec3 X, vec3 Y, Material mater
     vec3 Fs = mix(Cspec0, vec3(1), FH);
     float Gs;
     Gs  = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay);
-    Gs *= smithG_GGX_aniso(NdotV, dot(V, X), dot(V, Y), ax, ay);*/
+    Gs *= smithG_GGX_aniso(NdotV, dot(V, X), dot(V, Y), ax, ay);
 
     // 清漆
     float Dr = GTR1(NdotH, mix(0.1, 0.001, material.clearcoatGloss));
@@ -665,28 +688,28 @@ struct BounceLi {
 	float pR;
 };
 
-#define MAX_BOUNCE_DEPTH 4
+uniform int MAX_BOUNCE_DEPTH;
 
 vec3 Li(in Ray reye) {
 	Ray ray = reye;
 	Interaction isect;
-	// res[i]: 光线第i次弹射时，采样得到的直接光照，所在交点的BRDF，
-	// 采样得到下一次光线方向wi与法线夹角的cos值和pdf，俄罗斯轮盘赌的概率pR
+
 	vec3 Lo = vec3(0.0);
 	vec3 c = vec3(1.0); // 第i次弹射光照的累计权重
-	for (int bounce = 0; bounce < MAX_BOUNCE_DEPTH; ++bounce) {
+	for (bounce = 0; bounce < MAX_BOUNCE_DEPTH; ++bounce) {
 		if (!BVHIntersect(ray, isect)) {
 			return Lo;
 		}
 		const vec3 p = isect.position;
-		const vec3 n = isect.normal;
-		const vec3 wo = normalize(-ray.dir);
+		const vec3 N = isect.normal;
+		const vec3 V = normalize(-ray.dir);
 		Material material = GetMaterial(isect.materialId);
 		if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
 			material.baseColor = texture(textures[isect.textureId], isect.texcoord).rgb;
 		}
 
-		vec3 wi, t, b;
+		vec3 L, T, B;
+		BuildTangentSpace(N, T, B);
 		float pdf;
 
 		// 自发光
@@ -701,24 +724,28 @@ vec3 Li(in Ray reye) {
 			Ray r;
 			r.dir = triangleIsect.position - p;
 			r.tMax = 1.0 - ShadowEpsilon; // 防止光线与目标物体相交
-			r.origin = p + n * 0.0001; // 防止自相交
+			r.origin = p + N * 0.0001; // 防止自相交
 			if (!BVHIntersectP(r)) {
 				// pdf为所有灯光表面积的倒数
 				float l_Pdf = 1.f / lightsSumArea;
 				float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
 				vec3 li = GetMaterial(triangleIsect.materialId).emssive;
 				// 针对灯光方向计算的brdf
-				vec3 l_brdf = DisneyPrincipledBRDF(wo, n, normalize(r.dir), t, b, material);
-				LDirect += l_brdf * li * abs(dot(n, r.dir) * dot(triangleIsect.normal, r.dir)) / (l_Pdf * dis2);
+
+				vec3 l_brdf = DisneyPrincipledBRDF(V, N, normalize(r.dir), T, B, material);
+				LDirect += l_brdf * li * abs(dot(N, r.dir) * dot(triangleIsect.normal, r.dir)) / (l_Pdf * dis2);
 			}
 		}
 		Lo += c * LDirect;
 		// 随机采样wi得到的brdf
-		wi = UniformSampledWi(n, wo, pdf, t, b);
-		c *= DisneyPrincipledBRDF(wo, n, wi, t, b, material) * abs(dot(n, wi)) / pdf;
+		//wi = SampleCosineHemisphere(n, t, b, pdf);
+		L = SampleGTR2(N, T, B, V, max(0.001, material.roughness * material.roughness));
+		vec3 H = normalize(L + V);
+		pdf = SampleGTR2PDF(dot(N, H), dot(L, H), max(0.001, material.roughness * material.roughness));
+		c *= DisneyPrincipledBRDF(V, N, L, T, B, material) * abs(dot(N, L)) / pdf;
 
-		ray.origin = p + n * 0.0001f;
-		ray.dir = wi;
+		ray.origin = p + N * 0.0001f;
+		ray.dir = L;
 		ray.tMax = FLOAT_MAX;
 	}
 	return Lo;
@@ -735,7 +762,6 @@ void main() {
 	vec3 color = Li(ray);
 	color = clamp(color, vec3(0), vec3(1));
 	// 多帧混合
-	// 如果材质发生改变，则抛弃之前的绘制
-	vec3 preColor = redraw == 1 ? vec3(0.0) : imageLoad(output_image, imagePos).rgb;
+	vec3 preColor = imageLoad(output_image, imagePos).rgb;
 	imageStore(output_image, imagePos, vec4(mix(preColor, color, 1.0 / float(frameCount + 1)), 1.0));
 }
