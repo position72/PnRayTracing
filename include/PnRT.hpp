@@ -27,6 +27,7 @@
 #include <map>
 #include <set>
 #include <algorithm>
+#include <random>
 
 #pragma comment(lib, "./lib/glfw3.lib")
 #pragma comment(lib, "./lib/assimp-vc143-mt.lib")
@@ -69,7 +70,7 @@ struct Material {
 	float metallic = 0.0;
 	float specular = 0.0;
 	float specularTint = 0.0;
-	float roughness = 0.9;
+	float roughness = 0.5;
 	float anisotropic = 0.0;
 	float sheen = 0.0;
 	float sheenTint = 0.0;
@@ -142,7 +143,9 @@ inline glm::vec3 TextureGetColor1(int i, float u, float v) {
 }
 
 inline float Rand0To1() {
-	return (float)(rand() % 100000) / 100000;
+	static std::default_random_engine e;
+	static std::uniform_real_distribution<float> real(0, 1);
+	return real(e);
 }
 
 inline float Clamp(float x, float L, float R) {
@@ -151,24 +154,3 @@ inline float Clamp(float x, float L, float R) {
 	return x;
 }
 
-inline void LoadHDRImage(const char* path) { // 必须在某个着色器使用后调用
-	int width, height, nComps;
-	unsigned int hdrTexture;
-	float* hdrData = stbi_loadf(path, &width, &height, &nComps, 0);
-	if (!hdrData) {
-		std::cout << "Failed to load HDR image: " << path << std::endl;
-	} else {		
-		glGenTextures(1, &hdrTexture);
-		glActiveTexture(GL_TEXTURE30);
-		glBindTexture(GL_TEXTURE_2D, hdrTexture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, hdrData);
-
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-		std::cout << "Success to load HDR Image: " << path << std::endl;
-		stbi_image_free(hdrData);
-	}
-}

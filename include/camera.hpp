@@ -39,13 +39,26 @@ struct Camera {
 		nv = w * nv.x + u * nv.y + v * nv.z;
 		if (std::abs(glm::dot(up, nv)) > 0.9995f) return;
 		eye = center + nv * distance;
+		std::cout << "Now camera position: (" << eye[0] << ", " << eye[1] << ", " << eye[2] << ")" << std::endl;
 		UpdateCamera(eye, center, up, fov, aspect);
 	}
 
-	void UpdateTranslate(float delta) {
-		delta *= 0.05;
-		glm::vec3 nEye = eye + delta * w;
-		UpdateCamera(nEye, center, up, fov, aspect);
+	void UpdateTranslateUV(float deltaX, float deltaY) {
+		deltaX *= 0.05;
+		deltaY *= 0.05;
+		eye += deltaX * u + deltaY * v;
+		center += deltaX * u + deltaY * v;
+		std::cout << "Now camera position: (" << eye[0] << ", " << eye[1] << ", " << eye[2] << ")" << std::endl;
+		std::cout << "Now camera lookat: (" << center[0] << ", " << center[1] << ", " << center[2] << ")" << std::endl;
+		UpdateCamera(eye, center, up, fov, aspect);
+	}
+
+	void UpdateFov(float delta) {	
+		float nFov = fov + delta;
+		if (nFov < 89.f && nFov > 1.f) {
+			std::cout << "Now camera fov: " << " " << fov << std::endl;
+			UpdateCamera(eye, center, up, nFov, aspect);
+		}
 	}
 
 

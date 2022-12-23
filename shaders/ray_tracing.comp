@@ -80,7 +80,11 @@ struct Camera{
 #define LIGHT_VEC3_COUNT 1
 
 layout(binding = 0, rgba32f) uniform image2D output_image;
-layout(binding = 30) uniform sampler2D HDRImage;
+layout(binding = 29) uniform sampler2D HDRImage;
+layout(binding = 30) uniform sampler2D RandomHDR;
+uniform int HDRImageWidth;
+uniform int HDRImageHeight;
+uniform int HasHDRImage;
 
 layout(binding = 0) uniform samplerBuffer vertices;
 layout(binding = 1) uniform sampler1D materials;
@@ -173,14 +177,14 @@ Light GetLight(int i) {
 	return l;
 }
 
-// 将三维向量direction转为HDR的纹理坐标uv，再从HDR纹理采样
+// 将三维向量direction转为HDR的纹理坐标uv
 const vec2 invAtan = vec2(0.1591, 0.3183);
-vec3 SampleHDRMap(vec3 v) {
+vec2 toSphericalCoord(vec3 v) {
     vec2 uv = vec2(atan(v.z, v.x), asin(v.y));
     uv *= invAtan;
     uv += 0.5;
 	uv.y = 1.0 - uv.y;
-    return texture(HDRImage, uv).rgb;
+    return uv;
 }
 
 uniform mat4 ScreenToWorld;
@@ -500,6 +504,37 @@ float Rand0To1() {
     return float(wang_hash(seed)) / 4294967296.0;
 }
 
+
+// 在环境贴图上重要性采样
+vec3 SampleHDRImage(out vec3 L, out float pdf) {
+	float r1 = Rand0To1(), r2 = Rand0To1();
+	vec3 param = texture2D(RandomHDR, vec2(r1, r2)).rgb;
+	param.y = 1.0 - param.y; // flip
+
+	// 根据xy球坐标获取入射方向
+	float phi = 2.0 * PI * (param.x - 0.5);
+	float theta = PI * (param.y - 0.5);
+	L = vec3(cos(theta) * cos(phi), sin(theta), cos(theta) * sin(phi));
+
+	// pdf从2D平面向球坐标进行积分域转换
+	pdf = param.z;
+	float sinTheta = max(1e-10, sin(theta));
+	float convert = float(HDRImageWidth * HDRImageHeight / 2) / (2.0 * PI * PI * sinTheta);
+	pdf *= convert;
+	return texture(HDRImage, param.xy).rgb;
+}
+
+float SampleHDRImagePDF(in vec3 L) {
+	vec2 uv = toSphericalCoord(L);
+
+	// pdf从2D平面向球坐标进行积分域转换
+	float pdf = texture2D(RandomHDR, uv).b;
+	float sinTheta = L.y;
+	float convert = float(HDRImageWidth * HDRImageHeight / 2) / (2.0 * PI * PI * sinTheta);
+	pdf *= convert;
+	return pdf;
+}
+
 // 在切线空间下进行单位半球采样
 vec3 UniformSampleHemisphere(in vec2 u) {
     float z = u[0];
@@ -622,8 +657,40 @@ vec3 SampleGTR1(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float alpha) {
 	return l;
 }
 
+
+float SampleDisneyPDF(vec3 V, vec3 N, vec3 L, in Material material) {
+	/*
+		DisneyBRDF存在漫反射，镜面反射，清漆三种BRDF项，
+		根据三种BRDF项的能量贡献随机选取一项进行采样
+	*/
+	float rDiffuse = (1.0 - material.metallic);
+	float rSpecular = 1.0;
+	float rClearcoat = 0.25 * material.clearcoat;
+	float invSum = 1.0 / (rDiffuse + rSpecular + rClearcoat);
+
+	float pDiffuse = rDiffuse * invSum;
+	float pSpecular = rSpecular * invSum;
+	float pClearcoat = rClearcoat * invSum;
+	float alphaGTR1 = mix(0.1, 0.001, material.clearcoatGloss);
+	float alphaGTR2 = max(0.001, sqr(material.roughness));
+	/*
+		分别计算L在三种BRDF采样下的概率密度，
+		再根据能量贡献进行加权平均
+	*/
+	vec3 H = normalize(L + V);
+	float LdotH = dot(L, H);
+	float NdotH = dot(N, H);
+	float NdotL = dot(N, L);
+
+	float pdfDiffuse = NdotL * InvPI;
+	float pdfSpecular =  GTR2(NdotH, alphaGTR2) * NdotH / (4.0 * LdotH);
+	float pdfClearcoat = GTR1(NdotH, alphaGTR1) * NdotH / (4.0 * LdotH);
+
+	return pDiffuse * pdfDiffuse + pSpecular * pdfSpecular + pClearcoat * pdfClearcoat;
+}
+
 // DisneyBRDF重要性采样
-vec3 SampleDisney(in vec3 V, in vec3 N, in vec3 T, in vec3 B, in Material material, out float pdf) {
+vec3 SampleDisneyBRDF(in vec3 V, in vec3 N, in vec3 T, in vec3 B, in Material material, out float pdf) {
 	/*
 		DisneyBRDF存在漫反射，镜面反射，清漆三种BRDF项，
 		根据三种BRDF项的能量贡献随机选取一项进行采样
@@ -668,7 +735,7 @@ vec3 SampleDisney(in vec3 V, in vec3 N, in vec3 T, in vec3 B, in Material materi
 	return L;
 }
 
-vec3 DisneyPrincipledBRDF(vec3 V, vec3 N, vec3 L, vec3 X, vec3 Y, Material material) {
+vec3 DisneyBRDF(vec3 V, vec3 N, vec3 L, vec3 X, vec3 Y, Material material) {
 	float NdotL = dot(N, L);
     float NdotV = dot(N, V);
     if(NdotL < 0 || NdotV < 0) return vec3(0);
@@ -741,15 +808,23 @@ struct BounceLi {
 
 uniform int MAX_BOUNCE_DEPTH;
 
-vec3 Li(in Ray reye) {
-	Ray ray = reye;
+vec3 Li(Ray ray) {
 	Interaction isect;
 
 	vec3 Lo = vec3(0.0);
 	vec3 c = vec3(1.0); // 第i次弹射光照的累计权重
+	float PDF = 0.0; // 随机采样光线的PDF
 	for (bounce = 0; bounce < MAX_BOUNCE_DEPTH; ++bounce) {
 		if (!BVHIntersect(ray, isect)) {
-			Lo += c * SampleHDRMap(normalize(ray.dir));
+			if (HasHDRImage == 1) {
+				// 多重重要性采样
+				vec3 enL = normalize(ray.dir);
+				vec2 uv = toSphericalCoord(enL);
+				vec3 enLi = texture2D(HDRImage, uv).rgb;
+				float enPDF = SampleHDRImagePDF(enL);
+				float MISWeight = enPDF * enPDF / (enPDF * enPDF + PDF * PDF);
+				Lo += c * MISWeight * enLi;
+			}
 			return Lo;
 		}
 		const vec3 p = isect.position;
@@ -760,13 +835,12 @@ vec3 Li(in Ray reye) {
 			material.baseColor = texture(textures[isect.textureId], isect.texcoord).rgb;
 		}
 
-		vec3 L, T, B;
+		vec3 T, B;
 		BuildTangentSpace(N, T, B);
-		float pdf;
 
-		// 自发光 只在第一次bounce接受物体的自发光
-		vec3 LDirect = bounce == 0 ? material.emssive : vec3(0); 
-		// 其他灯光的直接光照
+		// 灯光的直接光照
+		/*vec3 LDirect = vec3(0.0);
+		float dPdf = 0.0;
 		int triIndex = GetLightIndex(Rand0To1());
 		if (triIndex != -1) { // 找到其中一个灯光
 			// 在该三角形上采样
@@ -779,21 +853,43 @@ vec3 Li(in Ray reye) {
 			r.origin = p + N * 0.0001; // 防止自相交
 			if (!BVHIntersectP(r)) {
 				// pdf为所有灯光表面积的倒数
-				float l_Pdf = 1.f / lightsSumArea;
+				dPdf = 1.f / lightsSumArea;
 				float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
 				vec3 li = GetMaterial(triangleIsect.materialId).emssive;
 				// 针对灯光方向计算的brdf
+				vec3 dBRDF = DisneyPrincipledBRDF(V, N, normalize(r.dir), T, B, material);
+				LDirect = dBRDF * li * abs(dot(N, r.dir) * abs(dot(triangleIsect.normal, r.dir))) / (dPdf * dis2);
+			}
+		}*/
 
-				vec3 l_brdf = DisneyPrincipledBRDF(V, N, normalize(r.dir), T, B, material);
-				LDirect += l_brdf * li * abs(dot(N, r.dir) * dot(triangleIsect.normal, r.dir)) / (l_Pdf * dis2);
+		// 来自环境贴图的光照
+		if (HasHDRImage == 1) {
+			vec3 enL;
+			float enPDF;
+			vec3 enLi = SampleHDRImage(enL, enPDF);
+			Ray enR;
+			enR.origin = p;
+			enR.dir = enL;
+			enR.tMax = FLOAT_MAX;
+			// 判断贴图与当前点之间有无遮挡
+			if (dot(enL, N) > 0 && !BVHIntersectP(enR)) { 
+				vec3 dBRDF = DisneyBRDF(V, N, enL, T, B, material);
+				float dPDF = SampleDisneyPDF(V, N, enL, material);
+				// 多重重要性采样
+				float MISWeight = enPDF * enPDF / (enPDF * enPDF + dPDF * dPDF);
+				Lo += c * MISWeight * dBRDF * enLi * dot(enL, N) / enPDF;
 			}
 		}
-		Lo += c * LDirect;
-		// 随机采样wi得到的brdf
-		L = SampleDisney(V, N, T, B, material, pdf);
-		//L = SampleCosineHemisphere(N, T, B);
-		//pdf = dot(N, L) * InvPI;
-		c *= DisneyPrincipledBRDF(V, N, L, T, B, material) * abs(dot(N, L)) / pdf;
+		
+		// 自发光
+		Lo += c * material.emssive;
+
+		// 随机采样入射光L作为下一次光线方向
+		vec3 L = SampleDisneyBRDF(V, N, T, B, material, PDF);
+		float NdotL = dot(N, L);
+		if (NdotL < 0.0) break;
+		c *= DisneyBRDF(V, N, L, T, B, material) * NdotL / PDF;
+
 		ray.origin = p + N * 0.0001f;
 		ray.dir = L;
 		ray.tMax = FLOAT_MAX;

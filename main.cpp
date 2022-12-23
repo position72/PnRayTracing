@@ -54,6 +54,7 @@ bool mouseButtonPress = false;
 bool mouseButtonLeftPress = false;
 bool mouseButtonRightPress = false;
 bool mouseFirstMove = false;
+bool mouseScroll = false;
 double lastX, lastY;
 glm::vec3 cameraPosition(0, 2.8, 7);
 glm::vec3 cameraCenter(0, 0, 0);
@@ -114,7 +115,7 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
 	}
 }
 
-void Cursorposfun(GLFWwindow* window, double xpos, double ypos) {
+void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
 	if (mouseButtonPress) {
 		if (!mouseFirstMove) {
 			lastX = xpos;
@@ -127,12 +128,17 @@ void Cursorposfun(GLFWwindow* window, double xpos, double ypos) {
 			camera.UpdateRotate(deltaX, deltaY);
 		}
 		if (mouseButtonRightPress) {
-			camera.UpdateTranslate(deltaX);
+			camera.UpdateTranslateUV(-deltaX, deltaY);
 		}
 
 		lastX = xpos;
 		lastY = ypos;
 	}
+}
+
+void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+	mouseScroll = true;
+	camera.UpdateFov(yoffset);
 }
 
 void PrefixSum() {
@@ -200,8 +206,9 @@ void CornellBox() {
 	m.baseColor = glm::vec3(0.65, 0.65, 0.65);
 	Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0, 0, -2)) *
 		glm::scale(glm::mat4(1), glm::vec3(8)), m, "bunny");
-	Model m1("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -0.5)), m, "marry");
-	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
+	//Model m0("./model/marry/marry.obj", glm::translate(glm::mat4(1), glm::vec3(0.1, 0, -0.5)), m, "marry");
+	//m.baseColor = glm::vec3(0.73, 0.73, 0.73);
+	//Model m0("./model/horse_statue_01_4k.fbx", glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "horse");
 	Model f1("./model/floor/floor.obj",
 		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "floor");
 	Model f2("./model/floor/floor.obj",
@@ -240,30 +247,116 @@ void CornellBox() {
 }
 
 void SceneFlat() {
-	glm::vec3 cameraEye(0, 2.8, 7);
+	glm::vec3 cameraEye(0, 13, 12);
+	glm::vec3 cameraCenter(0, 11, 7);
+	glm::vec3 cameraUp(0, 1, 0);
+	camera.UpdateCamera(cameraEye, cameraCenter, cameraUp, 64.f, (float)SCREEN_WIDTH / SCREEN_HEIGHT);
+	Material m;
+	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
+	m.roughness = 0.95;
+	m.metallic = 0.05;
+	Model floor("./model/floor/floor.obj", glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)) * 
+		glm::scale(glm::mat4(1), glm::vec3(0.5)), m, "floor");
+	Model front_wall("./model/floor/floor.obj", glm::translate(glm::mat4(1), glm::vec3(0, 13.85, -13.85)) *
+		glm::rotate(glm::mat4(1), glm::radians(90.f), glm::vec3(1, 0, 0)) * 
+		glm::scale(glm::mat4(1), glm::vec3(0.5)), m, "front_wall");
+
+	m.baseColor = glm::vec3(0.83);
+	m.metallic = 0.95;
+	m.roughness = 0.02;
+	Model board1("./model/floor/floor.obj", glm::translate(glm::mat4(1), glm::vec3(0, 2.8, -12)) *
+		glm::rotate(glm::mat4(1), glm::radians(50.f), glm::vec3(1, 0, 0)) * 
+		glm::scale(glm::mat4(1), glm::vec3(0.4, 2, 0.04)), m, "board1");
+
+	m.metallic = 0.80;
+	m.roughness = 0.15;
+	Model board2("./model/floor/floor.obj", glm::translate(glm::mat4(1), glm::vec3(0, 2.2, -9)) *
+		glm::rotate(glm::mat4(1), glm::radians(35.f), glm::vec3(1, 0, 0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.4, 2, 0.04)), m, "board2");
+
+	m.metallic = 0.60;
+	m.roughness = 0.35;
+	Model board3("./model/floor/floor.obj", glm::translate(glm::mat4(1), glm::vec3(0, 1.6, -6)) *
+		glm::rotate(glm::mat4(1), glm::radians(20.f), glm::vec3(1, 0, 0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.4, 2, 0.04)), m, "board3");
+
+	m.metallic = 0.30;
+	m.roughness = 0.65;
+	Model board4("./model/floor/floor.obj", glm::translate(glm::mat4(1), glm::vec3(0, 1, -3)) *
+		glm::rotate(glm::mat4(1), glm::radians(10.f), glm::vec3(1, 0, 0)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.4, 2, 0.04)), m, "board4");
+
+	m.emssive = glm::vec3(0.2, 0.5, 0.7) * 3.f;
+	m.metallic = 0.0;
+	m.roughness = 1.0;
+	m.baseColor = glm::vec3(0.2, 0.5, 0.7);
+	Model l1("./model/cube.obj", glm::translate(glm::mat4(1), glm::vec3(-9, 10, -8)) * 
+		glm::scale(glm::mat4(1), glm::vec3(0.25)), m, "light1");
+
+	m.emssive = glm::vec3(0.6, 0.5, 0.2) * 3.f;
+	m.metallic = 0.0;
+	m.roughness = 1.0;
+	m.baseColor = glm::vec3(0.6, 0.5, 0.2);
+	Model l2("./model/cube.obj", glm::translate(glm::mat4(1), glm::vec3(-3, 10, -8)) *
+		glm::scale(glm::mat4(1), glm::vec3(0.5)), m, "light2");
+
+	m.emssive = glm::vec3(0.4, 0.7, 0.2) * 3.f;
+	m.metallic = 0.0;
+	m.roughness = 1.0;
+	m.baseColor = glm::vec3(0.4, 0.7, 0.2);
+	Model l3("./model/cube.obj", glm::translate(glm::mat4(1), glm::vec3(3, 10, -8)) *
+		glm::scale(glm::mat4(1), glm::vec3(1)), m, "light3");
+
+	m.emssive = glm::vec3(0.8, 0.1, 0.2) * 3.f;
+	m.metallic = 0.0;
+	m.roughness = 1.0;
+	m.baseColor = glm::vec3(0.8, 0.1, 0.2);
+	Model l4("./model/cube.obj", glm::translate(glm::mat4(1), glm::vec3(9, 10, -8)) *
+		glm::scale(glm::mat4(1), glm::vec3(1.5)), m, "light4");
+
+	models.push_back(front_wall);
+	models.push_back(floor);
+	models.push_back(board1);
+	models.push_back(board2);
+	models.push_back(board3);
+	models.push_back(board4);
+	models.push_back(l1);
+	models.push_back(l2);
+	models.push_back(l3);
+	models.push_back(l4);
+}
+
+void teapot() {
+	glm::vec3 cameraEye(0, 5, 5);
 	glm::vec3 cameraCenter(0, 0, 0);
 	glm::vec3 cameraUp(0, 1, 0);
 	camera.UpdateCamera(cameraEye, cameraCenter, cameraUp, 45.f, (float)SCREEN_WIDTH / SCREEN_HEIGHT);
+
 	Material m;
-	m.baseColor = glm::vec3(0.65, 0.65, 0.65);
-	Model m0("./model/Bunny.obj", glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)) *
-		glm::scale(glm::mat4(1), glm::vec3(10)), m, "bunny");
-	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
-	Model floor("./model/floor/floor.obj",
-		glm::scale(glm::mat4(1), glm::vec3(1)), m, "floor");
-	models.push_back(m0);
+	m.baseColor = glm::vec3(0.6, 0.7, 0.2);
+	m.metallic = 0.7;
+	m.roughness = 0.3;
+	Model teapot("./model/teapot.obj", glm::scale(glm::mat4(1), glm::vec3(0.2)), m, "teapot");
+	m.baseColor = glm::vec3(0.73);
+	m.metallic = 0.2;
+	m.roughness = 0.85;
+	Model floor("./model/floor/floor.obj", glm::mat4(1), m, "floor");
+	models.push_back(teapot);
 	models.push_back(floor);
+
 }
 
 int main() {
 	WindowInit();
 
 	glfwSetMouseButtonCallback(window, MouseButtonCallback);
-	glfwSetCursorPosCallback(window, Cursorposfun);
+	glfwSetCursorPosCallback(window, CursorPosCallback);
+	glfwSetScrollCallback(window, ScrollCallback);
 
 	// 在这里更换场景
 	CornellBox();
 	//SceneFlat();
+	//teapot();
 	// 将模型数据输出到顶点和三角形数组
 	ModelOutput(models);
 	std::cout << "Load " << vertices.size() << " vertices and " << triangles.size() << " triangles" << std::endl;
@@ -301,8 +394,8 @@ int main() {
 	c1 = clock();
 
 	// 加载HDR
-	//LoadHDRImage("./HDR/clarens_midday_2k.hdr");
-	LoadHDRImage("./HDR/photo_studio_loft_hall_2k.hdr");
+	//LoadHDRImage("./HDR/clarens_midday_2k.hdr", cs);
+	LoadHDRImage("./HDR/vignaioli_night_1k.hdr", cs);
 
 	// 将数据存放到缓冲纹理中并传输到着色器中
 
@@ -496,7 +589,7 @@ int main() {
 		bool redraw = false;
 
 		ImGui::Begin("Settings");
-		if (gui->showModelSettingCombo() || mouseButtonPress) {
+		if (gui->showModelSettingCombo() || mouseButtonPress || mouseScroll) {
 			cs.setInt("MAX_BOUNCE_DEPTH", 1);
 			cs.setInt("redraw", 1);
 			frameCount = 0;
@@ -507,6 +600,8 @@ int main() {
 			redraw = false;
 		}
 		ImGui::End();
+
+		mouseScroll = false;
 
 		cs.setVec3f("camera.eye", camera.eye.x, camera.eye.y, camera.eye.z);
 		cs.setVec3f("camera.lowerLeftCorner", camera.lowerLeftCorner.x, 
@@ -531,6 +626,7 @@ int main() {
 		glfwPollEvents();
 
 		if (!redraw) ++frameCount;
+		
 	}
 	glfwTerminate();
 	return 0;
