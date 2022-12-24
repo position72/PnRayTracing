@@ -67,8 +67,8 @@ public:
 		change |= ImGui::SliderFloat("sheenTint", &materials[currentMaterialId].sheenTint, 0.0, 1.0);
 		change |= ImGui::SliderFloat("clearcoat", &materials[currentMaterialId].clearcoat, 0.0, 1.0);
 		change |= ImGui::SliderFloat("clearcoatGloss", &materials[currentMaterialId].clearcoatGloss, 0.0, 1.0);
-		change |= ImGui::SliderFloat("IOR", &materials[currentMaterialId].IOR, 0.0, 1.0);
-		change |= ImGui::SliderFloat("transmission", &materials[currentMaterialId].transmission, 0.0, 1.0);
+		/*change |= ImGui::SliderFloat("IOR", &materials[currentMaterialId].IOR, 0.0, 1.0);
+		change |= ImGui::SliderFloat("transmission", &materials[currentMaterialId].transmission, 0.0, 1.0);*/
 		
 		if (change) {
 			if (materials[currentMaterialId].emssive != glm::vec3(0)) {

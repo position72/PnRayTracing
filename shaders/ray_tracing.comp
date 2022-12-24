@@ -911,7 +911,7 @@ vec3 PathTracing(Interaction isect, vec3 V) {
 		vec3 LEnvironment = vec3(0.0);
 		float enPDF = 0.0;
 		// 来自环境贴图的光照
-		/*if (HasHDRImage == 1) {
+		if (HasHDRImage == 1) {
 			vec3 enL;
 			vec3 enLi = SampleHDRImage(enL, enPDF);
 			Ray enR;
@@ -923,7 +923,7 @@ vec3 PathTracing(Interaction isect, vec3 V) {
 				vec3 dBRDF = DisneyBRDF(V, N, enL, T, B, material);
 				LEnvironment = dBRDF * enLi * dot(enL, N) / enPDF;
 			}
-		}*/
+		}
 
 		vec2 uv = sobolVec2(frameCount + 1, bounce);
 		uv = CranleyPattersonRotation(uv);
