@@ -1,17 +1,17 @@
 # PnRayTracing
 
-基于OpenGL实现的光线追踪器，在glsl编写的计算着色器上运�?
+基于OpenGL实现的光线追踪器，在glsl编写的计算着色器上运�?
 
 特性：
 ----
-- BVH加速数据结�?
+- BVH加速数据结构
 - 纹理映射
 - DisneyPrincipledBRDF
-- BRDF，HDR环境贴图重要性采�?
-- sobol低差异序�?
-- 多重重要性采�?
+- BRDF，HDR环境贴图重要性采样
+- sobol低差异序列
+- 多重重要性采样
 
-运行环境�?
+运行环境�?
 ----
 - Windows10 x64 
 - Visual Studio 2022
