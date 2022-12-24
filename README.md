@@ -1,6 +1,6 @@
 # PnRayTracing
 
-基于OpenGL实现的光线追踪器，在glsl编写的计算着色器上运�?
+基于OpenGL实现的光线追踪器，在glsl编写的计算着色器上运行
 
 特性：
 ----
