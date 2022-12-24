@@ -11,7 +11,7 @@
 - sobol低差异序列
 - 多重重要性采样
 
-运行环境�?
+运行环境：
 ----
 - Windows10 x64 
 - Visual Studio 2022
