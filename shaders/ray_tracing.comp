@@ -187,6 +187,11 @@ vec2 toSphericalCoord(vec3 v) {
     return uv;
 }
 
+vec3 GetHDRImageColor(vec3 v) {
+	vec2 uv = toSphericalCoord(v);
+	return texture2D(HDRImage, uv).rgb;
+}
+
 uniform mat4 ScreenToWorld;
 uniform vec3 CameraEye;
 uniform int SCREEN_WIDTH;
@@ -200,7 +205,7 @@ layout(binding = 1) buffer debug_output{
 Ray CameraGetRay(float s, float t) {
 	Ray ray;
 	ray.origin = camera.eye;
-	ray.dir = camera.lowerLeftCorner + s * camera.horizontal + t * camera.vertical - camera.eye;
+	ray.dir = normalize(camera.lowerLeftCorner + s * camera.horizontal + t * camera.vertical - camera.eye);
 	ray.tMax = FLOAT_MAX;
 	return ray;
 }
@@ -499,11 +504,57 @@ uint wang_hash(inout uint seed) { // 迭代更新种子
     seed = seed ^ (seed >> 15);
     return seed;
 }
+
+const uint V[8*32] = {
+    2147483648u,1073741824u,536870912u,268435456u,134217728u,67108864u,33554432u,16777216u,8388608u,4194304u,2097152u,1048576u,524288u,262144u,131072u,65536u,32768u,16384u,8192u,4096u,2048u,1024u,512u,256u,128u,64u,32u,16u,8u,4u,2u,1u,2147483648u,3221225472u,2684354560u,4026531840u,2281701376u,3422552064u,2852126720u,4278190080u,2155872256u,3233808384u,2694840320u,4042260480u,2290614272u,3435921408u,2863267840u,4294901760u,2147516416u,3221274624u,2684395520u,4026593280u,2281736192u,3422604288u,2852170240u,4278255360u,2155905152u,3233857728u,2694881440u,4042322160u,2290649224u,3435973836u,2863311530u,4294967295u,2147483648u,3221225472u,1610612736u,2415919104u,3892314112u,1543503872u,2382364672u,3305111552u,1753219072u,2629828608u,3999268864u,1435500544u,2154299392u,3231449088u,1626210304u,2421489664u,3900735488u,1556135936u,2388680704u,3314585600u,1751705600u,2627492864u,4008611328u,1431684352u,2147543168u,3221249216u,1610649184u,2415969680u,3892340840u,1543543964u,2382425838u,3305133397u,2147483648u,3221225472u,536870912u,1342177280u,4160749568u,1946157056u,2717908992u,2466250752u,3632267264u,624951296u,1507852288u,3872391168u,2013790208u,3020685312u,2181169152u,3271884800u,546275328u,1363623936u,4226424832u,1977167872u,2693105664u,2437829632u,3689389568u,635137280u,1484783744u,3846176960u,2044723232u,3067084880u,2148008184u,3222012020u,537002146u,1342505107u,2147483648u,1073741824u,536870912u,2952790016u,4160749568u,3690987520u,2046820352u,2634022912u,1518338048u,801112064u,2707423232u,4038066176u,3666345984u,1875116032u,2170683392u,1085997056u,579305472u,3016343552u,4217741312u,3719483392u,2013407232u,2617981952u,1510979072u,755882752u,2726789248u,4090085440u,3680870432u,1840435376u,2147625208u,1074478300u,537900666u,2953698205u,2147483648u,1073741824u,1610612736u,805306368u,2818572288u,335544320u,2113929216u,3472883712u,2290089984u,3829399552u,3059744768u,1127219200u,3089629184u,4199809024u,3567124480u,1891565568u,394297344u,3988799488u,920674304u,4193267712u,2950604800u,3977188352u,3250028032u,129093376u,2231568512u,2963678272u,4281226848u,432124720u,803643432u,1633613396u,2672665246u,3170194367u,2147483648u,3221225472u,2684354560u,3489660928u,1476395008u,2483027968u,1040187392u,3808428032u,3196059648u,599785472u,505413632u,4077912064u,1182269440u,1736704000u,2017853440u,2221342720u,3329785856u,2810494976u,3628507136u,1416089600u,2658719744u,864310272u,3863387648u,3076993792u,553150080u,272922560u,4167467040u,1148698640u,1719673080u,2009075780u,2149644390u,3222291575u,2147483648u,1073741824u,2684354560u,1342177280u,2281701376u,1946157056u,436207616u,2566914048u,2625634304u,3208642560u,2720006144u,2098200576u,111673344u,2354315264u,3464626176u,4027383808u,2886631424u,3770826752u,1691164672u,3357462528u,1993345024u,3752330240u,873073152u,2870150400u,1700563072u,87021376u,1097028000u,1222351248u,1560027592u,2977959924u,23268898u,437609937u
+};
+
+// 格林码 
+uint grayCode(uint i) {
+	return i ^ (i>>1);
+}
+
+// 生成第 d 维度的第 i 个 sobol 数
+float sobol(uint d, uint i) {
+    uint result = 0;
+    uint offset = d * 32;
+    for(uint j = 0; i!=0; i >>= 1, j++) 
+        if((i & 1)!=0)
+            result ^= V[j+offset];
+
+    return float(result) * (1.0f/float(0xFFFFFFFFU));
+}
  
 float Rand0To1() {
     return float(wang_hash(seed)) / 4294967296.0;
 }
 
+// 生成第 i 帧的第 b 次反弹需要的二维随机向量
+vec2 sobolVec2(uint i, uint b) {
+    float u = sobol(b*2, grayCode(i));
+    float v = sobol(b*2+1, grayCode(i));
+    return vec2(u, v);
+}
+
+vec2 CranleyPattersonRotation(vec2 p) {
+    uint pseed = uint(
+        uint((imagePos.x) * SCREEN_WIDTH)  * uint(1973) + 
+        uint((imagePos.y) * SCREEN_HEIGHT) * uint(9277) + 
+        uint(114514/1919) * uint(26699)) | uint(1);
+    
+    float u = float(wang_hash(pseed)) / 4294967296.0;
+    float v = float(wang_hash(pseed)) / 4294967296.0;
+
+    p.x += u;
+    if(p.x>1) p.x -= 1;
+    if(p.x<0) p.x += 1;
+
+    p.y += v;
+    if(p.y>1) p.y -= 1;
+    if(p.y<0) p.y += 1;
+
+    return p;
+}
 
 // 在环境贴图上重要性采样
 vec3 SampleHDRImage(out vec3 L, out float pdf) {
@@ -633,8 +684,7 @@ vec3 mon2lin(vec3 x) {
 }
 
 // DisneyBRDF镜面反射重要性采样
-vec3 SampleGTR2(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float alpha) {
-	float r1 = Rand0To1(), r2 = Rand0To1();
+vec3 SampleGTR2(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float r1, in float r2, in float alpha) {
 	float phiH = 2.0 * PI * r1;
 	float cosThetaH = sqrt((1.0 - r2) / (1.0 + (alpha * alpha - 1.0) * r2));
 	float sinThetaH = max(0.0, 1.0 - sqr(cosThetaH));
@@ -645,8 +695,7 @@ vec3 SampleGTR2(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float alpha) {
 }
 
 // DisneyBRDF清漆重要性采样
-vec3 SampleGTR1(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float alpha) {
-	float r1 = Rand0To1(), r2 = Rand0To1();
+vec3 SampleGTR1(in vec3 n, in vec3 t, in vec3 b, in vec3 v, in float r1, in float r2, in float alpha) {
 	float phiH = 2.0 * PI * r1;
 	float cosThetaH = sqrt((1.0 - pow(alpha * alpha, 1.0 - r2)) / (1.0 - alpha * alpha));
 	float sinThetaH = max(0.0, 1.0 - sqr(cosThetaH));
@@ -690,7 +739,8 @@ float SampleDisneyPDF(vec3 V, vec3 N, vec3 L, in Material material) {
 }
 
 // DisneyBRDF重要性采样
-vec3 SampleDisneyBRDF(in vec3 V, in vec3 N, in vec3 T, in vec3 B, in Material material, out float pdf) {
+vec3 SampleDisneyBRDF(in vec3 V, in vec3 N, in vec3 T, in vec3 B, in Material material, 
+	in float r1, in float r2, out float pdf) {
 	/*
 		DisneyBRDF存在漫反射，镜面反射，清漆三种BRDF项，
 		根据三种BRDF项的能量贡献随机选取一项进行采样
@@ -713,9 +763,9 @@ vec3 SampleDisneyBRDF(in vec3 V, in vec3 N, in vec3 T, in vec3 B, in Material ma
 	if (r <= pDiffuse) {
 		L = SampleCosineHemisphere(N, T, B);
 	} else if (r <= pDiffuse + pSpecular) {
-		L = SampleGTR2(N, T, B, V, alphaGTR2);
+		L = SampleGTR2(N, T, B, V, r1, r2, alphaGTR2);
 	} else {
-		L = SampleGTR1(N, T, B, V, alphaGTR1);
+		L = SampleGTR1(N, T, B, V, r1, r2, alphaGTR1);
 	}
 
 	/*
@@ -808,39 +858,25 @@ struct BounceLi {
 
 uniform int MAX_BOUNCE_DEPTH;
 
-vec3 Li(Ray ray) {
-	Interaction isect;
-
+vec3 PathTracing(Interaction isect, vec3 V) {
 	vec3 Lo = vec3(0.0);
 	vec3 c = vec3(1.0); // 第i次弹射光照的累计权重
-	float PDF = 0.0; // 随机采样光线的PDF
+
 	for (bounce = 0; bounce < MAX_BOUNCE_DEPTH; ++bounce) {
-		if (!BVHIntersect(ray, isect)) {
-			if (HasHDRImage == 1) {
-				// 多重重要性采样
-				vec3 enL = normalize(ray.dir);
-				vec2 uv = toSphericalCoord(enL);
-				vec3 enLi = texture2D(HDRImage, uv).rgb;
-				float enPDF = SampleHDRImagePDF(enL);
-				float MISWeight = enPDF * enPDF / (enPDF * enPDF + PDF * PDF);
-				Lo += c * MISWeight * enLi;
-			}
-			return Lo;
-		}
-		const vec3 p = isect.position;
-		const vec3 N = isect.normal;
-		const vec3 V = normalize(-ray.dir);
+		vec3 P = isect.position;
+		vec3 N = isect.normal;
+		
 		Material material = GetMaterial(isect.materialId);
 		if (isect.textureId != -1) { // 将材质baseColor修改为纹理颜色
 			material.baseColor = texture(textures[isect.textureId], isect.texcoord).rgb;
 		}
-
+		// 建立切线空间
 		vec3 T, B;
 		BuildTangentSpace(N, T, B);
 
 		// 灯光的直接光照
-		/*vec3 LDirect = vec3(0.0);
-		float dPdf = 0.0;
+		vec3 LDirect = vec3(0.0);
+		float lightPDF = 0.0;
 		int triIndex = GetLightIndex(Rand0To1());
 		if (triIndex != -1) { // 找到其中一个灯光
 			// 在该三角形上采样
@@ -848,55 +884,92 @@ vec3 Li(Ray ray) {
 			Interaction triangleIsect = TriangleSample(tri, vec2(Rand0To1(), Rand0To1()));
 			// 发射阴影射线，判断灯光与当前点之间有无遮挡
 			Ray r;
-			r.dir = triangleIsect.position - p;
+			r.dir = triangleIsect.position - P;
 			r.tMax = 1.0 - ShadowEpsilon; // 防止光线与目标物体相交
-			r.origin = p + N * 0.0001; // 防止自相交
+			r.origin = P + N * 0.0001; // 防止自相交
 			if (!BVHIntersectP(r)) {
-				// pdf为所有灯光表面积的倒数
-				dPdf = 1.f / lightsSumArea;
 				float dis2 = r.dir.x * r.dir.x + r.dir.y * r.dir.y + r.dir.z * r.dir.z;
+				vec3 lightL = normalize(r.dir);
+				lightPDF = (dis2) / (abs(dot(triangleIsect.normal, -lightL)) * lightsSumArea);
 				vec3 li = GetMaterial(triangleIsect.materialId).emssive;
 				// 针对灯光方向计算的brdf
-				vec3 dBRDF = DisneyPrincipledBRDF(V, N, normalize(r.dir), T, B, material);
-				LDirect = dBRDF * li * abs(dot(N, r.dir) * abs(dot(triangleIsect.normal, r.dir))) / (dPdf * dis2);
+				vec3 lightBRDF = DisneyBRDF(V, N, lightL, T, B, material);
+				if (imagePos == ivec2(500, 100) && bounce == 0) {
+					debug_data[7] = lightPDF;
+					debug_data[8] = lightBRDF[0];
+					debug_data[9] = lightBRDF[1];
+					debug_data[10] = lightBRDF[2];
+					debug_data[11] = li[0];
+					debug_data[12] = li[1];
+					debug_data[13] = li[2];
+					debug_data[14] = abs(dot(N, lightL));
+				}
+				LDirect = lightBRDF * li * abs(dot(N, lightL)) / lightPDF;
 			}
-		}*/
+		}
 
+		vec3 LEnvironment = vec3(0.0);
+		float enPDF = 0.0;
 		// 来自环境贴图的光照
-		if (HasHDRImage == 1) {
+		/*if (HasHDRImage == 1) {
 			vec3 enL;
-			float enPDF;
 			vec3 enLi = SampleHDRImage(enL, enPDF);
 			Ray enR;
-			enR.origin = p;
+			enR.origin = P;
 			enR.dir = enL;
 			enR.tMax = FLOAT_MAX;
 			// 判断贴图与当前点之间有无遮挡
 			if (dot(enL, N) > 0 && !BVHIntersectP(enR)) { 
 				vec3 dBRDF = DisneyBRDF(V, N, enL, T, B, material);
-				float dPDF = SampleDisneyPDF(V, N, enL, material);
-				// 多重重要性采样
-				float MISWeight = enPDF * enPDF / (enPDF * enPDF + dPDF * dPDF);
-				Lo += c * MISWeight * dBRDF * enLi * dot(enL, N) / enPDF;
+				LEnvironment = dBRDF * enLi * dot(enL, N) / enPDF;
 			}
-		}
-		
-		// 自发光
-		Lo += c * material.emssive;
+		}*/
 
+		vec2 uv = sobolVec2(frameCount + 1, bounce);
+		uv = CranleyPattersonRotation(uv);
 		// 随机采样入射光L作为下一次光线方向
-		vec3 L = SampleDisneyBRDF(V, N, T, B, material, PDF);
-		float NdotL = dot(N, L);
-		if (NdotL < 0.0) break;
-		c *= DisneyBRDF(V, N, L, T, B, material) * NdotL / PDF;
+		float dPDF;
+		vec3 L = SampleDisneyBRDF(V, N, T, B, material, uv.x, uv.y, dPDF);
+		vec3 dBRDF = DisneyBRDF(V, N, L, T, B, material);
+		float NdotL = abs(dot(N, L));
 
-		ray.origin = p + N * 0.0001f;
+		// 多重重要性采样
+		float invPDFSum = 1.f / (enPDF + lightPDF + dPDF);
+		Lo += c * (LEnvironment * enPDF + LDirect * lightPDF) * invPDFSum; 
+		//c *= dPDF * invPDFSum;
+		if (imagePos == ivec2(100, 500) && bounce == 1) {
+			debug_data[0] = enPDF;
+			debug_data[1] = lightPDF;
+			debug_data[2] = dPDF;
+			debug_data[3] = c[0];
+			debug_data[4] = c[1];
+			debug_data[5] = c[2];
+			debug_data[6] = invPDFSum;
+		}
+
+		Ray ray;
+		ray.origin = P + N * 0.0001f;
 		ray.dir = L;
 		ray.tMax = FLOAT_MAX;
+		
+		// 计算下一次弹射到的交点
+		if (!BVHIntersect(ray, isect)) {
+			if (HasHDRImage == 1) {
+				vec3 enL = normalize(ray.dir);
+				vec3 enLi =	GetHDRImageColor(enL);				
+				Lo += c * enLi * dBRDF * NdotL / dPDF;
+			}
+			return Lo;
+		}
+
+		// 自发光
+		Lo += c * GetMaterial(isect.materialId).emssive * dBRDF * NdotL / dPDF;
+
+		c *= dBRDF * NdotL / dPDF;
+		V = -ray.dir;
 	}
 	return Lo;
 }
-
 
 uniform int redraw;
 void main() {
@@ -905,7 +978,13 @@ void main() {
 				uint(imagePos.y) * uint(9277) + 
 				uint(frameCount) * uint(26699)) | uint(1); // 初始化种子
 	Ray ray = CameraGetRay(float(imagePos.x) / float(SCREEN_WIDTH), float(imagePos.y) / float(SCREEN_HEIGHT));
-	vec3 color = Li(ray);
+	Interaction isect;
+	vec3 color;
+	if (!BVHIntersect(ray, isect)) {
+		color = GetHDRImageColor(ray.dir);
+	} else {
+		color = GetMaterial(isect.materialId).emssive + PathTracing(isect, -ray.dir);
+	}
 	color = clamp(color, vec3(0), vec3(1));
 	// 多帧混合
 	vec3 preColor = imageLoad(output_image, imagePos).rgb;

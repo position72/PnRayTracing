@@ -227,10 +227,10 @@ void CornellBox() {
 		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "left_wall");
 	m.baseColor = glm::vec3(0.73, 0.73, 0.73);
 	Model f5("./model/floor/floor.obj",
-		glm::translate(glm::mat4(1), glm::vec3(0, 5.55, 0)) *
+		glm::translate(glm::mat4(1), glm::vec3(0, 5.54, 0)) *
 		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
 		glm::scale(glm::mat4(1), glm::vec3(0.1)), m, "ceiling");
-	m.emssive = glm::vec3(3);
+	m.emssive = glm::vec3(60);
 	Model light("./model/floor/floor.obj",
 		glm::translate(glm::mat4(1), glm::vec3(0, 5.54, 0)) *
 		glm::rotate(glm::mat4(1), glm::radians(180.f), glm::vec3(0.0, 0.0, 1.0)) *
